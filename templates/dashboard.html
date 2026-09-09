@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>TCS GRU Stock Prediction Dashboard</title>
+
+    <link rel="stylesheet"
+          href="{{ url_for('static', filename='style.css') }}">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+
+
+<body>
+
+
+<!-- =========================================================
+     NAVBAR
+========================================================= -->
+
+<nav class="navbar">
+
+    <div class="navbar-brand">
+
+        <h2>TCS Stock Prediction</h2>
+
+        <span>GRU Based Prediction System</span>
+
+    </div>
+
+
+    <div class="navbar-right">
+
+        <span class="welcome-text">
+
+            Welcome, {{ current_user.name or current_user.username }}
+
+        </span>
+
+
+        <a href="{{ url_for('logout') }}"
+           class="logout-btn">
+
+            Logout
+
+        </a>
+
+    </div>
+
+</nav>
+
+
+
+<!-- =========================================================
+     MAIN DASHBOARD
+========================================================= -->
+
+<main class="dashboard-container">
+
+
+    <!-- PAGE HEADER -->
+
+    <section class="page-header">
+
+        <div>
+
+            <h1>TCS Stock Price Prediction</h1>
+
+            <p>
+                AI-powered next trading day prediction using GRU
+            </p>
+
+            <a href="{{ url_for('refresh_market') }}" class="refresh-btn">
+                🔄 Refresh Market Data
+            </a>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- MARKET STATUS -->
+
+    <section class="market-status">
+
+        <div class="status-left">
+
+            <span class="status-dot"></span>
+
+            <strong>Market Data</strong>
+
+            {% if live_data_available %}
+
+                <span class="status-text">
+                    Latest TCS data available
+                </span>
+
+            {% else %}
+
+                <span class="status-text">
+                    Using stored historical data
+                </span>
+
+            {% endif %}
+
+        </div>
+
+
+        <div class="status-date">
+
+            {% if latest_date %}
+
+                Latest Date: {{ latest_date }}
+
+            {% endif %}
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =====================================================
+         STAT CARDS
+    ====================================================== -->
+
+    <section class="stats-grid">
+
+
+        <!-- Latest Price -->
+
+        <div class="stat-card">
+
+            <div class="stat-label">
+                Latest TCS Price
+            </div>
+
+            <div class="stat-value">
+
+                ₹{{ "%.2f"|format(latest_price|float) }}
+
+            </div>
+
+            <div class="stat-subtitle">
+
+                Latest Closing Price
+
+            </div>
+
+        </div>
+
+
+
+        <!-- Predicted Price -->
+
+        <div class="stat-card prediction-card">
+
+            <div class="stat-label">
+                GRU Predicted Price
+            </div>
+
+            <div class="stat-value">
+
+                ₹{{ "%.2f"|format(predicted_price|float) }}
+
+            </div>
+
+            <div class="stat-subtitle">
+
+                Next Trading Day
+
+            </div>
+
+        </div>
+
+
+        <!-- Expected Movement -->
+
+        <div class="stat-card movement-card">
+
+            <div class="stat-label">
+                Expected Movement
+            </div>
+
+            <div class="stat-value">
+
+                {{ direction_symbol }}
+
+                {{ "%.2f"|format(percentage_change|float) }}%
+
+            </div>
+
+            <div class="stat-subtitle">
+
+                {{ direction }}
+
+            </div>
+
+        </div>
+
+
+
+        <!-- MAE -->
+
+        <div class="stat-card">
+
+            <div class="stat-label">
+                Model MAE
+            </div>
+
+            <div class="stat-value">
+
+                ₹{{ "%.2f"|format(mae|float) }}
+
+            </div>
+
+            <div class="stat-subtitle">
+
+                Mean Absolute Error
+
+            </div>
+
+        </div>
+
+
+        <!-- Prediction Accuracy -->
+
+        <div class="stat-card">
+
+            <div class="stat-label">
+                Prediction Accuracy
+            </div>
+
+            <div class="stat-value">
+                {{ "%.2f"|format(prediction_accuracy|float) }}%
+            </div>
+
+            <div class="stat-subtitle">
+                Based on MAPE
+            </div>
+
+        </div>
+
+
+        <!-- Highest Price -->
+
+        <div class="stat-card">
+
+            <div class="stat-label">
+                Highest Price
+            </div>
+
+            <div class="stat-value">
+                ₹{{ "%.2f"|format(highest_price|float) }}
+            </div>
+
+            <div class="stat-subtitle">
+                Historical Maximum
+            </div>
+
+        </div>
+
+        <!-- Lowest Price -->
+
+        <div class="stat-card">
+
+            <div class="stat-label">
+                Lowest Price
+            </div>
+
+            <div class="stat-value">
+                ₹{{ "%.2f"|format(lowest_price|float) }}
+            </div>
+
+            <div class="stat-subtitle">
+                Historical Minimum
+            </div>
+
+        </div>
+
+        <!-- Average Price -->
+
+        <div class="stat-card">
+
+            <div class="stat-label">
+                Average Price
+            </div>
+
+            <div class="stat-value">
+                ₹{{ "%.2f"|format(average_price|float) }}
+            </div>
+
+            <div class="stat-subtitle">
+                Historical Average
+            </div>
+
+        </div>
+
+
+    </section>
+
+
+
+    <!-- =====================================================
+         PREDICTION SECTION
+    ====================================================== -->
+
+    <section class="dashboard-card prediction-section">
+
+        <div class="section-header">
+
+            <div>
+
+                <h2>Prediction Overview</h2>
+
+                <p>
+                    Predict the next trading day's TCS closing price
+                    using the trained GRU model.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="prediction-action">
+
+            <form method="POST"
+                  action="{{ url_for('predict') }}">
+
+                <button type="submit"
+                        class="predict-btn">
+
+                    Predict Next Trading Day
+
+                    <span class="button-arrow">→</span>
+
+                </button>
+
+            </form>
+
+        </div>
+
+
+        {% if prediction_done %}
+
+        <div class="success-message">
+
+            Prediction generated successfully.
+
+        </div>
+
+
+        <div class="prediction-result">
+
+
+            <div class="prediction-box">
+
+                <span>
+                    Latest Price
+                </span>
+
+                <strong>
+                    ₹{{ "%.2f"|format(latest_price|float) }}
+                </strong>
+
+            </div>
+
+
+            <div class="prediction-arrow">
+
+                →
+
+            </div>
+
+
+            <div class="prediction-box predicted-box">
+
+                <span>
+                    Predicted Price
+                </span>
+
+                <strong>
+                    ₹{{ "%.2f"|format(predicted_price|float) }}
+                </strong>
+
+            </div>
+
+
+            <div class="prediction-box">
+
+                <span>
+                    Expected Change
+                </span>
+
+                <strong>
+
+                    {{ direction_symbol }}
+
+                    ₹{{ "%.2f"|format(price_difference|float) }}
+
+                    ({{ "%.2f"|format(percentage_change|float) }}%)
+
+                </strong>
+
+            </div>
+
+
+        </div>
+
+        {% endif %}
+
+    </section>
+
+    <!-- =====================================================
+         HISTORICAL GRAPH - NOW INTERACTIVE
+    ====================================================== -->
+
+    <section class="dashboard-card">
+
+        <div class="section-header">
+
+            <div>
+
+                <h2>TCS Historical Price</h2>
+
+                <p>
+                    Historical TCS closing price used for model training.
+                </p>
+
+            </div>
+
+            <span class="chart-badge">
+                Interactive
+            </span>
+
+        </div>
+
+
+        <div class="time-buttons">
+
+            <button onclick="changePeriod(22)">
+                1 Month
+            </button>
+
+            <button onclick="changePeriod(66)">
+                3 Months
+            </button>
+
+            <button onclick="changePeriod(132)">
+                6 Months
+            </button>
+
+            <button onclick="changePeriod(252)">
+                1 Year
+            </button>
+
+        </div>
+
+        <div class="chart-wrapper">
+
+            <canvas id="historicalPriceChart"></canvas>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =====================================================
+         ACTUAL VS PREDICTED GRAPH - NOW INTERACTIVE
+    ====================================================== -->
+
+    <section class="dashboard-card">
+
+        <div class="section-header">
+
+            <div>
+
+                <h2>Actual vs Predicted Price</h2>
+
+                <p>
+                    Comparison of actual TCS prices with GRU model predictions.
+                </p>
+
+            </div>
+
+            <span class="chart-badge">
+                Interactive
+            </span>
+
+        </div>
+
+
+        <div class="comparison-time-buttons">
+
+            <button type="button"
+                    class="comparison-time-btn active"
+                    data-period="22">
+                1 Month
+            </button>
+
+            <button type="button"
+                    class="comparison-time-btn"
+                    data-period="66">
+                3 Months
+            </button>
+
+            <button type="button"
+                    class="comparison-time-btn"
+                    data-period="132">
+                6 Months
+            </button>
+
+            <button type="button"
+                    class="comparison-time-btn"
+                    data-period="252">
+                1 Year
+            </button>
+
+        </div>
+
+        <div class="chart-wrapper">
+
+            <canvas id="comparisonChart"></canvas>
+
+        </div>
+
+    </section>
+
+
+    <!-- =====================================================
+         PREDICTION HISTORY
+    ====================================================== -->
+
+    <section class="dashboard-card prediction-history-section">
+
+        <div class="section-header">
+            <div>
+                <h2>Prediction History</h2>
+                <p>
+                    Your recent GRU predictions are stored for reference.
+                </p>
+            </div>
+        </div>
+
+        {% if prediction_history %}
+
+        <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th style="text-align: left; padding: 12px;">Date</th>
+                        <th style="text-align: right; padding: 12px;">Current Price</th>
+                        <th style="text-align: right; padding: 12px;">Predicted Price</th>
+                        <th style="text-align: right; padding: 12px;">Predicted Change</th>
+                        <th style="text-align: right; padding: 12px;">Forecast</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    {% for item in prediction_history %}
+                    <tr>
+                        <td style="padding: 12px;">{{ item[0] }}</td>
+                        <td style="text-align: right; padding: 12px;">₹{{ "%.2f"|format(item[1]|float) }}</td>
+                        <td style="text-align: right; padding: 12px;">₹{{ "%.2f"|format(item[2]|float) }}</td>
+                        <td style="text-align: right; padding: 12px;">
+                            {% if item[3] >= 0 %}+{% endif %}₹{{ "%.2f"|format(item[3]|float) }}
+                            ({{ "%.2f"|format(item[4]|float) }}%)
+                        </td>
+                        <td style="text-align: right; padding: 12px;">
+                            {% if item[5] == "UP" %}
+                                📈 UP
+                            {% elif item[5] == "DOWN" %}
+                                📉 DOWN
+                            {% else %}
+                                ➖ NEUTRAL
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% else %}
+
+        <p style="padding: 10px 0;">
+            No prediction history yet. Click "Predict Next Trading Day" to create your first record.
+        </p>
+
+        {% endif %}
+
+    </section>
+
+
+    <!-- =====================================================
+         DOWNLOAD DATA
+    ====================================================== -->
+
+    <section class="dashboard-card download-section">
+
+        <div class="section-header">
+
+            <div>
+
+                <h2>Historical Data</h2>
+
+                <p>
+                    Download the TCS historical stock dataset used
+                    in this project.
+                </p>
+
+            </div>
+
+            <a
+                href="{{ url_for('download_historical') }}"
+                class="download-btn"
+            >
+                📥 Download CSV
+            </a>
+
+        </div>
+
+    </section>
+
+
+    <!-- =====================================================
+         MODEL INFORMATION
+    ====================================================== -->
+
+    <section class="dashboard-card model-information">
+
+        <div class="section-header">
+
+            <div>
+
+                <h2>Model Information</h2>
+
+                <p>
+                    Details about the GRU-based prediction model.
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="model-grid">
+
+
+            <div class="model-item">
+
+                <span class="model-label">
+                    Model
+                </span>
+
+                <strong>
+                    GRU
+                </strong>
+
+            </div>
+
+
+            <div class="model-item">
+
+                <span class="model-label">
+                    Input Sequence
+                </span>
+
+                <strong>
+                    60 Trading Days
+                </strong>
+
+            </div>
+
+
+            <div class="model-item">
+
+                <span class="model-label">
+                    Optimizer
+                </span>
+
+                <strong>
+                    Adam
+                </strong>
+
+            </div>
+
+
+            <div class="model-item">
+
+                <span class="model-label">
+                    Loss Function
+                </span>
+
+                <strong>
+                    Mean Squared Error
+                </strong>
+
+            </div>
+
+
+            <div class="model-item">
+
+                <span class="model-label">
+                    MAE
+                </span>
+
+                <strong>
+                    ₹{{ "%.2f"|format(mae|float) }}
+                </strong>
+
+            </div>
+
+
+            <div class="model-item">
+
+                <span class="model-label">
+                    RMSE
+                </span>
+
+                <strong>
+                    ₹{{ "%.2f"|format(rmse|float) }}
+                </strong>
+
+            </div>
+
+
+            <div class="model-item">
+                <span class="model-label">
+                    Prediction Accuracy
+                </span>
+
+                <strong>
+                    {{ "%.2f"|format(prediction_accuracy|float) }}%
+                </strong>
+            </div>
+
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =====================================================
+         HOW IT WORKS
+    ====================================================== -->
+
+    <section class="dashboard-card">
+
+        <div class="section-header">
+
+            <div>
+
+                <h2>How the System Works</h2>
+
+            </div>
+
+        </div>
+
+
+        <div class="steps-container">
+
+
+            <div class="step">
+
+                <div class="step-number">
+                    1
+                </div>
+
+                <div>
+
+                    <h3>Data Collection</h3>
+
+                    <p>
+                        TCS historical stock data is collected
+                        from Yahoo Finance.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="step">
+
+                <div class="step-number">
+                    2
+                </div>
+
+                <div>
+
+                    <h3>Preprocessing</h3>
+
+                    <p>
+                        Closing prices are scaled using MinMaxScaler
+                        and converted into 60-day sequences.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="step">
+
+                <div class="step-number">
+                    3
+                </div>
+
+                <div>
+
+                    <h3>GRU Model</h3>
+
+                    <p>
+                        The GRU network learns relationships between
+                        previous stock prices.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="step">
+
+                <div class="step-number">
+                    4
+                </div>
+
+                <div>
+
+                    <h3>Prediction</h3>
+
+                    <p>
+                        The trained model predicts the next
+                        trading day's closing price.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =====================================================
+         DISCLAIMER
+    ====================================================== -->
+
+    <section class="disclaimer">
+
+        <strong>Disclaimer:</strong>
+
+        <p>
+            This project is developed for academic and educational
+            purposes. Stock price predictions are estimates generated
+            by a machine learning model and should not be considered
+            financial advice or guaranteed future prices.
+        </p>
+
+    </section>
+
+
+</main>
+
+
+
+<!-- =========================================================
+     FOOTER
+========================================================= -->
+
+<footer class="footer">
+
+    <p>
+        GRU Stock Price Prediction System |
+        Academic Project
+    </p>
+
+</footer>
+
+
+
+<!-- =========================================================
+     DATA FROM FLASK
+========================================================= -->
+
+<script id="chart-data"
+        type="application/json">
+
+{
+    "recent_dates":
+        {{ chart_dates | default([], true) | tojson }},
+
+    "recent_prices":
+        {{ chart_prices | default([], true) | tojson }},
+
+    "historical_dates":
+        {{ historical_chart_dates | default([], true) | tojson }},
+
+    "historical_prices":
+        {{ historical_chart_prices | default([], true) | tojson }},
+
+    "comparison_dates":
+        {{ comparison_dates | default([], true) | tojson }},
+
+    "actual_prices":
+        {{ actual_chart_prices | default([], true) | tojson }},
+
+    "predicted_prices":
+        {{ predicted_chart_prices | default([], true) | tojson }}
+}
+
+</script>
+
+<script id="comparisonDates"
+        type="application/json">
+    {{ comparison_dates | tojson }}
+</script>
+
+<script id="actualChartPrices"
+        type="application/json">
+    {{ actual_chart_prices | tojson }}
+</script>
+
+<script id="predictedChartPrices"
+        type="application/json">
+    {{ predicted_chart_prices | tojson }}
+</script>
+
+
+
+<!-- =========================================================
+     CHART JAVASCRIPT
+========================================================= -->
+
+<script>
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+
+        console.log(
+            "Dashboard loaded."
+        );
+
+
+        // ====================================================
+        // CHECK CHART.JS
+        // ====================================================
+
+        if (typeof Chart === "undefined") {
+
+            console.error(
+                "Chart.js could not be loaded."
+            );
+
+            return;
+
+        }
+
+
+        // ====================================================
+        // READ FLASK DATA
+        // ====================================================
+
+        const dataElement =
+            document.getElementById(
+                "chart-data"
+            );
+
+
+        if (!dataElement) {
+
+            console.error(
+                "Chart data element not found."
+            );
+
+            return;
+
+        }
+
+
+        let chartData;
+
+
+        try {
+
+            chartData =
+                JSON.parse(
+                    dataElement.textContent
+                );
+
+        }
+
+        catch (error) {
+
+            console.error(
+                "Could not read chart data:",
+                error
+            );
+
+            return;
+
+        }
+
+
+        // ====================================================
+        // COMMON CHART OPTIONS
+        // ====================================================
+
+        const commonOptions = {
+
+            responsive: true,
+
+            maintainAspectRatio: false,
+
+            interaction: {
+
+                mode: "index",
+
+                intersect: false
+
+            },
+
+            plugins: {
+
+                legend: {
+
+                    display: true
+
+                },
+
+                tooltip: {
+
+                    enabled: true,
+
+                    callbacks: {
+
+                        label: function (context) {
+
+                            return (
+                                context.dataset.label +
+                                ": ₹" +
+                                Number(
+                                    context.parsed.y
+                                ).toFixed(2)
+                            );
+
+                        }
+
+                    }
+
+                }
+
+            },
+
+            scales: {
+
+                x: {
+
+                    title: {
+
+                        display: true,
+
+                        text: "Date"
+
+                    },
+
+                    ticks: {
+
+                        maxTicksLimit: 12
+
+                    }
+
+                },
+
+                y: {
+
+                    title: {
+
+                        display: true,
+
+                        text: "Price (₹)"
+
+                    }
+
+                }
+
+            }
+
+        };
+
+
+        // ====================================================
+        // 1. RECENT TCS PRICE CHART
+        // ====================================================
+
+        const recentCanvas =
+            document.getElementById(
+                "tcsPriceChart"
+            );
+
+
+        if (
+            recentCanvas &&
+            chartData.recent_dates.length > 0
+        ) {
+
+            new Chart(
+                recentCanvas,
+                {
+
+                    type: "line",
+
+                    data: {
+
+                        labels:
+                            chartData.recent_dates,
+
+                        datasets: [
+
+                            {
+
+                                label:
+                                    "TCS Closing Price",
+
+                                data:
+                                    chartData.recent_prices,
+
+                                borderWidth: 2,
+
+                                pointRadius: 0,
+
+                                pointHoverRadius: 5,
+
+                                tension: 0.25,
+
+                                fill: true
+
+                            }
+
+                        ]
+
+                    },
+
+                    options:
+                        commonOptions
+
+                }
+            );
+
+            console.log(
+                "Recent TCS chart created."
+            );
+
+        }
+
+
+        // ====================================================
+        // 2. HISTORICAL TCS PRICE CHART
+        // ====================================================
+
+        const historicalCanvas =
+            document.getElementById(
+                "historicalPriceChart"
+            );
+
+
+        if (
+            historicalCanvas &&
+            chartData.historical_dates.length > 0
+        ) {
+
+            let historicalChart = new Chart(
+                historicalCanvas,
+                {
+
+                    type: "line",
+
+                    data: {
+
+                        labels:
+                            chartData.historical_dates.slice(-252),
+
+                        datasets: [
+
+                            {
+
+                                label:
+                                    "TCS Historical Closing Price",
+
+                                data:
+                                    chartData.historical_prices.slice(-252),
+
+                                borderWidth: 2,
+
+                                pointRadius: 0,
+
+                                pointHoverRadius: 4,
+
+                                tension: 0.2,
+
+                                fill: true
+
+                            }
+
+                        ]
+
+                    },
+
+                    options:
+                        commonOptions
+
+                }
+            );
+
+            window.changePeriod = function (days) {
+
+                const selectedDates = chartData.historical_dates.slice(-days);
+                const selectedPrices = chartData.historical_prices.slice(-days);
+
+                historicalChart.data.labels = selectedDates;
+                historicalChart.data.datasets[0].data = selectedPrices;
+                historicalChart.update();
+
+            };
+
+            console.log(
+                "Historical TCS chart created."
+            );
+
+        }
+
+
+        // ====================================================
+        // 3. ACTUAL VS PREDICTED CHART WITH TIME FILTER
+        // ====================================================
+
+        const comparisonDatesElement =
+            document.getElementById(
+                "comparisonDates"
+            );
+
+        const actualPricesElement =
+            document.getElementById(
+                "actualChartPrices"
+            );
+
+        const predictedPricesElement =
+            document.getElementById(
+                "predictedChartPrices"
+            );
+
+        const comparisonCanvas =
+            document.getElementById(
+                "comparisonChart"
+            );
+
+
+        if (
+            comparisonCanvas &&
+            comparisonDatesElement &&
+            actualPricesElement &&
+            predictedPricesElement
+        ) {
+
+            const comparisonDates = JSON.parse(
+                comparisonDatesElement.textContent
+            );
+
+            const actualPrices = JSON.parse(
+                actualPricesElement.textContent
+            );
+
+            const predictedPrices = JSON.parse(
+                predictedPricesElement.textContent
+            );
+
+            let comparisonChart = null;
+
+            function updateComparisonChart(days) {
+
+                const startIndex = Math.max(
+                    comparisonDates.length - days,
+                    0
+                );
+
+                const filteredDates = comparisonDates.slice(startIndex);
+                const filteredActual = actualPrices.slice(startIndex);
+                const filteredPredicted = predictedPrices.slice(startIndex);
+
+                if (comparisonChart !== null) {
+                    comparisonChart.destroy();
+                }
+
+                comparisonChart = new Chart(
+                    comparisonCanvas,
+                    {
+
+                        type: "line",
+
+                        data: {
+
+                            labels: filteredDates,
+
+                            datasets: [
+
+                                {
+
+                                    label: "Actual Price",
+
+                                    data: filteredActual,
+
+                                    borderWidth: 2,
+
+                                    tension: 0.3,
+
+                                    pointRadius: 0
+
+                                },
+
+                                {
+
+                                    label: "Predicted Price",
+
+                                    data: filteredPredicted,
+
+                                    borderWidth: 2,
+
+                                    tension: 0.3,
+
+                                    pointRadius: 0
+
+                                }
+
+                            ]
+
+                        },
+
+                        options: {
+
+                            responsive: true,
+
+                            maintainAspectRatio: false,
+
+                            interaction: {
+
+                                mode: "index",
+
+                                intersect: false
+
+                            },
+
+                            plugins: {
+
+                                legend: {
+
+                                    display: true
+
+                                }
+
+                            },
+
+                            scales: {
+
+                                x: {
+
+                                    ticks: {
+
+                                        maxTicksLimit: 10
+
+                                    }
+
+                                },
+
+                                y: {
+
+                                    ticks: {
+
+                                        callback: function (value) {
+
+                                            return "₹" + value;
+
+                                        }
+
+                                    }
+
+                                }
+
+                            }
+
+                        }
+
+                    }
+                );
+
+            }
+
+            document.querySelectorAll(".comparison-time-btn").forEach(
+                function (button) {
+                    button.addEventListener("click", function () {
+
+                        const days = parseInt(
+                            this.getAttribute("data-period"),
+                            10
+                        );
+
+                        document.querySelectorAll(".comparison-time-btn").forEach(
+                            function (btn) {
+                                btn.classList.remove("active");
+                            }
+                        );
+
+                        this.classList.add("active");
+
+                        updateComparisonChart(days);
+
+                    });
+                }
+            );
+
+            updateComparisonChart(252);
+
+            console.log(
+                "Actual vs Predicted chart created with time filters."
+            );
+
+        }
+
+
+        console.log(
+            "All interactive charts created successfully."
+        );
+
+    }
+
+);
+
+</script>
+
+
+</body>
+
+</html>
