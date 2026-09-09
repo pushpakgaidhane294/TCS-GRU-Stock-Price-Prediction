@@ -472,7 +472,8 @@ def get_latest_tcs_data():
             period="3mo",
             interval="1d",
             auto_adjust=True,
-            progress=False
+            progress=False,
+            timeout=10
         )
 
         if latest_data.empty:
