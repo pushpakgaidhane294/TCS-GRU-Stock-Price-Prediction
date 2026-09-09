@@ -1,6 +1,7 @@
 Flask
 Flask-Login
 Werkzeug
+gunicorn
 numpy
 pandas
 scikit-learn
@@ -8,4 +9,3 @@ tensorflow
 yfinance
 joblib
 matplotlib
-gunicorn
