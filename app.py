@@ -31,10 +31,7 @@ except ImportError:  # pragma: no cover
 
 app = Flask(__name__)
 
-app.secret_key = os.environ.get(
-    "SECRET_KEY",
-    "gru_stock_prediction_secret_key"
-)
+app.secret_key = "gru_stock_prediction_secret_key"
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -142,32 +139,6 @@ def init_db():
         )
         """
     )
-
-    # Migrate older prediction_history tables safely.
-    # CREATE TABLE IF NOT EXISTS does not add missing columns to an existing table.
-    history_columns = [
-        row["name"]
-        for row in conn.execute(
-            "PRAGMA table_info(prediction_history)"
-        ).fetchall()
-    ]
-
-    history_columns_to_add = {
-        "user_id": "INTEGER",
-        "prediction_date": "TEXT",
-        "latest_price": "REAL DEFAULT 0",
-        "predicted_price": "REAL DEFAULT 0",
-        "difference": "REAL DEFAULT 0",
-        "percentage_change": "REAL DEFAULT 0",
-        "direction": "TEXT DEFAULT 'DOWN'",
-        "created_at": "TEXT"
-    }
-
-    for col, definition in history_columns_to_add.items():
-        if col not in history_columns:
-            conn.execute(
-                f"ALTER TABLE prediction_history ADD COLUMN {col} {definition}"
-            )
 
     conn.commit()
     conn.close()
@@ -502,7 +473,7 @@ def get_latest_tcs_data():
             interval="1d",
             auto_adjust=True,
             progress=False,
-            timeout=5
+            timeout=10
         )
 
         if latest_data.empty:
