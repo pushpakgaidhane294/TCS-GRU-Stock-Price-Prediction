@@ -1056,108 +1056,72 @@ def login():
 # ROUTE - REGISTER
 # ============================================================
 
-@app.route(
-    "/register",
-    methods=["GET", "POST"]
-)
+@app.route("/register", methods=["GET", "POST"])
 def register():
 
     if request.method == "POST":
 
-        name = request.form.get(
-            "name",
-            ""
-        ).strip()
-
-        email = request.form.get(
-            "email",
-            ""
-        ).strip()
-
-        password = request.form.get(
-            "password",
-            ""
-        )
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "").strip()
 
         if not name or not email or not password:
-
             return render_template(
                 "register.html",
                 error="Please fill all fields."
             )
 
-        hashed_password = generate_password_hash(
-            password
-        )
+        if len(password) < 6:
+            return render_template(
+                "register.html",
+                error="Password must be at least 6 characters."
+            )
 
         conn = get_db_connection()
 
-        columns = [
-            row["name"]
-            for row in conn.execute(
-                "PRAGMA table_info(users)"
-            ).fetchall()
-        ]
-
         try:
+            existing_user = conn.execute(
+                "SELECT id FROM users WHERE LOWER(username) = ?",
+                (email,)
+            ).fetchone()
 
-            if "username" in columns:
-
-                conn.execute(
-                    """
-                    INSERT INTO users
-                    (username, password, name)
-                    VALUES (?, ?, ?)
-                    """,
-                    (
-                        email,
-                        hashed_password,
-                        name
-                    )
-                )
-
-            elif "email" in columns:
-
-                conn.execute(
-                    """
-                    INSERT INTO users
-                    (email, password)
-                    VALUES (?, ?)
-                    """,
-                    (
-                        email,
-                        hashed_password
-                    )
-                )
-
-            else:
-
+            if existing_user:
                 conn.close()
-
                 return render_template(
                     "register.html",
-                    error="Database structure is invalid."
+                    error="Email already exists. Please use another email."
                 )
+
+            hashed_password = generate_password_hash(password)
+
+            conn.execute(
+                """
+                INSERT INTO users (username, password, name)
+                VALUES (?, ?, ?)
+                """,
+                (email, hashed_password, name)
+            )
 
             conn.commit()
             conn.close()
 
-            return redirect(
-                url_for("login")
-            )
+            print(f"Registration successful: {email}")
 
-        except sqlite3.IntegrityError:
+            return redirect(url_for("login"))
 
+        except Exception as e:
+
+            conn.rollback()
             conn.close()
+
+            print(f"Registration error: {e}")
 
             return render_template(
                 "register.html",
-                error="Email already exists."
+                error="Registration failed. Please try again."
             )
 
-    return render_template(
-        "register.html"
-    )
+    return render_template("register.html")
 
 
 # ============================================================
