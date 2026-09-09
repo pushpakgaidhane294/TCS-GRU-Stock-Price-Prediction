@@ -7,4 +7,5 @@ scikit-learn
 tensorflow
 yfinance
 joblib
+matplotlib
 gunicorn
