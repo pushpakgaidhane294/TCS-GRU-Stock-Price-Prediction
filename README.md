@@ -762,7 +762,7 @@ The Flask application provides a health-check endpoint:
 Example:
 
 ```text
-https://your-render-app.onrender.com/health
+https://tcs-gru-stock-price-prediction-3.onrender.com/health
 ```
 
 A successful response is:
