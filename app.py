@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file
+from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash
 from flask_login import (
     LoginManager,
     UserMixin,
@@ -58,6 +58,9 @@ SCALER_PATH = "model/scaler.pkl"
 DATA_PATH = "data/TCS_stock.csv"
 DATABASE = "database.db"
 
+# Original model training information
+MODEL_TRAIN_SIZE = 1580
+ORIGINAL_TEST_END = 1976
 SEQUENCE_LENGTH = 60
 TICKER = "TCS.NS"
 
@@ -93,6 +96,30 @@ historical_data["Close"] = pd.to_numeric(
 historical_data = historical_data.dropna(
     subset=["Close"]
 ).reset_index(drop=True)
+
+
+def reload_historical_data():
+
+    global historical_data
+
+    historical_data = pd.read_csv(DATA_PATH)
+
+    historical_data["Date"] = pd.to_datetime(
+        historical_data["Date"]
+    )
+
+    historical_data["Close"] = pd.to_numeric(
+        historical_data["Close"],
+        errors="coerce"
+    )
+
+    historical_data = historical_data.dropna(
+        subset=["Close"]
+    ).reset_index(drop=True)
+
+    print(
+        f"Reloaded TCS data: {len(historical_data)} rows"
+    )
 
 
 # ============================================================
@@ -450,17 +477,193 @@ def calculate_model_results():
     )
 
 
+def calculate_extended_predictions():
+    """
+    Generate Actual vs Predicted values from the original model
+    training boundary up to the latest available trading date.
+
+    The GRU model is NOT retrained.
+    """
+
+    global historical_data
+
+    if historical_data is None or len(historical_data) <= MODEL_TRAIN_SIZE:
+        return [], [], []
+
+    close_prices = historical_data["Close"].values.reshape(-1, 1)
+
+    # Keep the original model training period fixed
+    train_data = close_prices[:MODEL_TRAIN_SIZE]
+
+    # Everything after original training becomes out-of-sample data
+    future_data = close_prices[MODEL_TRAIN_SIZE:]
+
+    # Use the SAME scaler that was used during model training
+    train_scaled = scaler.transform(train_data)
+    future_scaled = scaler.transform(future_data)
+
+    # Last 60 training values are needed to predict the first test value
+    combined_scaled = np.concatenate(
+        [train_scaled[-SEQUENCE_LENGTH:], future_scaled]
+    )
+
+    X_extended = []
+
+    for i in range(SEQUENCE_LENGTH, len(combined_scaled)):
+        X_extended.append(
+            combined_scaled[i-SEQUENCE_LENGTH:i]
+        )
+
+    X_extended = np.array(X_extended)
+
+    if len(X_extended) == 0:
+        return [], [], []
+
+    # Use existing trained GRU model
+    predicted_scaled = model.predict(
+        X_extended,
+        verbose=0
+    )
+
+    # Convert predictions back to actual ₹ prices
+    predicted_prices_extended = scaler.inverse_transform(
+        predicted_scaled
+    ).flatten()
+
+    actual_prices_extended = scaler.inverse_transform(
+        future_scaled
+    ).flatten()
+
+    # Corresponding dates
+    test_dates_extended = (
+        historical_data["Date"]
+        .iloc[MODEL_TRAIN_SIZE:]
+        .reset_index(drop=True)
+    )
+
+    return (
+        actual_prices_extended,
+        predicted_prices_extended,
+        test_dates_extended
+    )
+
+
 # ============================================================
-# GET LATEST TCS DATA
+# GET MARKET DATA
 # ============================================================
+
+def get_stored_tcs_data():
+
+    print("Using stored TCS data from CSV...")
+
+    latest_price = float(
+        historical_data["Close"].iloc[-1]
+    )
+
+    latest_date = historical_data[
+        "Date"
+    ].iloc[-1].strftime("%d %b %Y")
+
+    recent = historical_data.tail(252)
+
+    recent_prices = historical_data[
+        "Close"
+    ].tail(SEQUENCE_LENGTH).values
+
+    chart_dates = [
+        date.strftime("%d %b %Y")
+        for date in recent["Date"]
+    ]
+
+    chart_prices = [
+        round(float(price), 2)
+        for price in recent["Close"]
+    ]
+
+    return (
+        latest_price,
+        latest_date,
+        recent_prices,
+        chart_dates,
+        chart_prices,
+        False
+    )
+
 
 def get_latest_tcs_data():
+    """
+    Get latest TCS data from the locally stored CSV.
+
+    Yahoo Finance is only called when the user explicitly
+    clicks Refresh Market Data.
+    """
+
+    global historical_data
+
+    if historical_data is None or historical_data.empty:
+        return {
+            "latest_price": 0,
+            "latest_date": "",
+            "recent_prices": [],
+            "chart_dates": [],
+            "chart_prices": [],
+            "live": False
+        }
+
+    latest_price = float(
+        historical_data["Close"].iloc[-1]
+    )
+
+    latest_date = str(
+        historical_data["Date"].iloc[-1]
+    )
+
+    recent_prices = (
+        historical_data["Close"]
+        .tail(60)
+        .tolist()
+    )
+
+    chart_data = historical_data.tail(252)
+
+    chart_dates = (
+        chart_data["Date"]
+        .astype(str)
+        .tolist()
+    )
+
+    chart_prices = (
+        chart_data["Close"]
+        .astype(float)
+        .tolist()
+    )
+
+    return {
+        "latest_price": latest_price,
+        "latest_date": latest_date,
+        "recent_prices": recent_prices,
+        "chart_dates": chart_dates,
+        "chart_prices": chart_prices,
+        "live": False
+    }
+
+
+def refresh_market_data():
+    """
+    Download latest TCS data from Yahoo Finance and MERGE it
+    with the existing full historical dataset.
+
+    This prevents the original 2018-present history from
+    being overwritten by only the latest 3 months.
+    """
+
+    global historical_data
+    global actual_prices
+    global predicted_prices
+    global test_dates
 
     try:
-
-        print(
-            "Fetching latest TCS data from Yahoo Finance..."
-        )
+        print("Refreshing TCS market data...")
 
         latest_data = yf.download(
             TICKER,
@@ -472,163 +675,115 @@ def get_latest_tcs_data():
         )
 
         if latest_data.empty:
+            print("Yahoo Finance returned no data.")
+            return False
 
-            raise Exception(
-                "Yahoo Finance returned empty data."
-            )
-
-        # ----------------------------------------------------
-        # Handle MultiIndex columns
-        # ----------------------------------------------------
-
-        if isinstance(
-            latest_data.columns,
-            pd.MultiIndex
-        ):
-
-            latest_data.columns = [
-                column[0]
-                for column in latest_data.columns
-            ]
+        # Handle Yahoo Finance MultiIndex columns
+        if isinstance(latest_data.columns, pd.MultiIndex):
+            latest_data.columns = latest_data.columns.get_level_values(0)
 
         latest_data = latest_data.reset_index()
 
-        # ----------------------------------------------------
-        # Find date column
-        # ----------------------------------------------------
+        # Keep only required columns
+        latest_data = latest_data[["Date", "Close"]].copy()
 
-        if "Date" not in latest_data.columns:
-
-            if "Datetime" in latest_data.columns:
-
-                latest_data.rename(
-                    columns={
-                        "Datetime": "Date"
-                    },
-                    inplace=True
-                )
-
-        # ----------------------------------------------------
-        # Clean Close column
-        # ----------------------------------------------------
+        latest_data["Date"] = pd.to_datetime(
+            latest_data["Date"]
+        )
 
         latest_data["Close"] = pd.to_numeric(
             latest_data["Close"],
             errors="coerce"
         )
 
-        latest_data = latest_data.dropna(
-            subset=["Close"]
-        ).reset_index(drop=True)
-
-        # ----------------------------------------------------
-        # Need at least 60 records
-        # ----------------------------------------------------
-
-        if len(latest_data) < SEQUENCE_LENGTH:
-
-            raise Exception(
-                "Not enough recent data."
-            )
-
-        # ----------------------------------------------------
-        # Latest price
-        # ----------------------------------------------------
-
-        latest_price = float(
-            latest_data["Close"].iloc[-1]
+        latest_data.dropna(
+            subset=["Date", "Close"],
+            inplace=True
         )
 
-        latest_date = latest_data[
-            "Date"
-        ].iloc[-1]
+        # Load existing full historical data
+        existing_data = pd.read_csv(DATA_PATH)
 
-        latest_date = pd.to_datetime(
-            latest_date
-        ).strftime("%d %b %Y")
-
-        # ----------------------------------------------------
-        # Last 60 closing prices
-        # ----------------------------------------------------
-
-        recent_prices = latest_data[
-            "Close"
-        ].tail(SEQUENCE_LENGTH).values
-
-        # ----------------------------------------------------
-        # Recent chart data
-        # ----------------------------------------------------
-
-        # Send the last 1 year of data to the dashboard
-        chart_data = latest_data.tail(252)
-
-        chart_dates = [
-            pd.to_datetime(date).strftime("%d %b %Y")
-            for date in chart_data["Date"]
-        ]
-
-        chart_prices = [
-            round(float(price), 2)
-            for price in chart_data["Close"]
-        ]
-
-        return (
-            latest_price,
-            latest_date,
-            recent_prices,
-            chart_dates,
-            chart_prices,
-            True
+        existing_data["Date"] = pd.to_datetime(
+            existing_data["Date"]
         )
 
-    except Exception as error:
+        existing_data["Close"] = pd.to_numeric(
+            existing_data["Close"],
+            errors="coerce"
+        )
+
+        existing_data.dropna(
+            subset=["Date", "Close"],
+            inplace=True
+        )
+
+        # Merge old + new data
+        combined_data = pd.concat(
+            [
+                existing_data[["Date", "Close"]],
+                latest_data[["Date", "Close"]]
+            ],
+            ignore_index=True
+        )
+
+        # Remove duplicate trading dates
+        combined_data.drop_duplicates(
+            subset=["Date"],
+            keep="last",
+            inplace=True
+        )
+
+        # Sort chronologically
+        combined_data.sort_values(
+            "Date",
+            inplace=True
+        )
+
+        combined_data.reset_index(
+            drop=True,
+            inplace=True
+        )
+
+        # Save FULL historical dataset
+        combined_data.to_csv(
+            DATA_PATH,
+            index=False
+        )
+
+        # Reload data
+        historical_data = combined_data.copy()
+
+        # Recalculate Actual vs Predicted graph
+        (
+            actual_prices,
+            predicted_prices,
+            test_dates
+        ) = calculate_extended_predictions()
 
         print(
-            "Could not fetch latest Yahoo Finance data:"
+            "Market data refreshed successfully."
         )
-
-        print(error)
 
         print(
-            "Using stored historical data instead."
+            "Latest date:",
+            historical_data["Date"].iloc[-1]
         )
 
-        # ----------------------------------------------------
-        # FALLBACK TO CSV
-        # ----------------------------------------------------
-
-        latest_price = float(
-            historical_data["Close"].iloc[-1]
+        print(
+            "Total rows:",
+            len(historical_data)
         )
 
-        latest_date = historical_data[
-            "Date"
-        ].iloc[-1].strftime("%d %b %Y")
+        return True
 
-        recent = historical_data.tail(252)
-
-        recent_prices = recent[
-            "Close"
-        ].values
-
-        chart_dates = [
-            date.strftime("%d %b %Y")
-            for date in recent["Date"]
-        ]
-
-        chart_prices = [
-            round(float(price), 2)
-            for price in recent["Close"]
-        ]
-
-        return (
-            latest_price,
-            latest_date,
-            recent_prices,
-            chart_dates,
-            chart_prices,
-            False
+    except Exception as e:
+        print(
+            "Market refresh error:",
+            str(e)
         )
+
+        return False
 
 
 # ============================================================
@@ -636,99 +791,51 @@ def get_latest_tcs_data():
 # ============================================================
 
 def make_latest_prediction(recent_prices):
+    """
+    Predict the next trading day's TCS closing price
+    using the latest 60 closing prices.
+    """
 
-    recent_prices = np.array(
-        recent_prices
-    ).reshape(-1, 1)
+    try:
+        recent_prices = pd.to_numeric(
+            pd.Series(recent_prices),
+            errors="coerce"
+        ).dropna().values
 
-    # --------------------------------------------------------
-    # Scale
-    # --------------------------------------------------------
+        if len(recent_prices) < SEQUENCE_LENGTH:
+            raise ValueError(
+                f"Need at least {SEQUENCE_LENGTH} prices for prediction."
+            )
 
-    scaled_prices = scaler.transform(
-        recent_prices
-    )
+        recent_prices = recent_prices[-SEQUENCE_LENGTH:]
 
-    # --------------------------------------------------------
-    # Reshape for GRU
-    # Shape = (1, 60, 1)
-    # --------------------------------------------------------
+        scaled_prices = scaler.transform(
+            recent_prices.reshape(-1, 1)
+        )
 
-    X_latest = scaled_prices.reshape(
-        1,
-        SEQUENCE_LENGTH,
-        1
-    )
+        X_latest = scaled_prices.reshape(
+            1,
+            SEQUENCE_LENGTH,
+            1
+        )
 
-    # --------------------------------------------------------
-    # Prediction
-    # --------------------------------------------------------
+        predicted_scaled = model.predict(
+            X_latest,
+            verbose=0
+        )
 
-    predicted_scaled = model.predict(
-        X_latest,
-        verbose=0
-    )
+        predicted_price = scaler.inverse_transform(
+            predicted_scaled
+        )[0][0]
 
-    # --------------------------------------------------------
-    # Inverse transform
-    # --------------------------------------------------------
+        return float(predicted_price)
 
-    predicted_price = scaler.inverse_transform(
-        predicted_scaled
-    )[0][0]
-
-    predicted_price = float(
-        predicted_price
-    )
-
-    latest_price = float(
-        recent_prices[-1][0]
-    )
-
-    # --------------------------------------------------------
-    # Difference
-    # --------------------------------------------------------
-
-    price_difference = (
-        predicted_price -
-        latest_price
-    )
-
-    # --------------------------------------------------------
-    # Percentage change
-    # --------------------------------------------------------
-
-    percentage_change = (
-        price_difference /
-        latest_price
-    ) * 100
-
-    # --------------------------------------------------------
-    # Direction
-    # --------------------------------------------------------
-
-    if percentage_change > 0.05:
-
-        direction = "UP"
-        direction_symbol = "📈"
-
-    elif percentage_change < -0.05:
-
-        direction = "DOWN"
-        direction_symbol = "📉"
-
-    else:
-
-        direction = "NEUTRAL"
-        direction_symbol = "➖"
-
-    return (
-        predicted_price,
-        price_difference,
-        percentage_change,
-        direction,
-        direction_symbol
-    )
+    except Exception as e:
+        print(
+            "Latest prediction error:",
+            str(e)
+        )
+        return None
 
 
 # ------------------------------------------------------------
@@ -771,6 +878,13 @@ def save_prediction_movement(session_data, prediction_price, latest_price):
     test_dates
 ) = calculate_model_results()
 
+# Extended Actual vs Predicted graph
+(
+    actual_prices,
+    predicted_prices,
+    test_dates
+) = calculate_extended_predictions()
+
 
 print(
     f"Model MAE: ₹{MAE:.2f}"
@@ -796,14 +910,36 @@ print(
 
 def get_dashboard_data():
 
-    (
-        latest_price,
-        latest_date,
-        recent_prices,
-        chart_dates,
-        chart_prices,
-        live_data_available
-    ) = get_latest_tcs_data()
+    global actual_prices
+    global predicted_prices
+    global test_dates
+
+    latest_data = get_latest_tcs_data()
+
+    latest_price = latest_data["latest_price"]
+    latest_date = latest_data["latest_date"]
+    recent_prices = latest_data["recent_prices"]
+    chart_dates = latest_data["chart_dates"]
+    chart_prices = latest_data["chart_prices"]
+    live_data_available = latest_data["live"]
+
+    current_price = float(latest_price)
+
+    predicted_price = make_latest_prediction(
+        recent_prices
+    )
+
+    if predicted_price is not None:
+        if predicted_price > current_price:
+            prediction_direction = "UP"
+        elif predicted_price < current_price:
+            prediction_direction = "DOWN"
+        else:
+            prediction_direction = "UNCHANGED"
+    else:
+        prediction_direction = "N/A"
+
+    # NOTE: prediction history is saved only in the /predict route.
 
     # --------------------------------------------------------
     # PRICE STATISTICS
@@ -824,15 +960,33 @@ def get_dashboard_data():
         2
     )
 
-    (
-        predicted_price,
-        price_difference,
-        percentage_change,
-        direction,
-        direction_symbol
-    ) = make_latest_prediction(
+    predicted_price = make_latest_prediction(
         recent_prices
     )
+
+    current_price = float(latest_price)
+
+    if predicted_price is not None:
+        price_difference = predicted_price - current_price
+        percentage_change = (
+            (price_difference / current_price) * 100
+        ) if current_price else 0.0
+
+        if predicted_price > current_price:
+            direction = "UP"
+            direction_symbol = "📈"
+        elif predicted_price < current_price:
+            direction = "DOWN"
+            direction_symbol = "📉"
+        else:
+            direction = "NEUTRAL"
+            direction_symbol = "➖"
+    else:
+        predicted_price = current_price
+        price_difference = 0.0
+        percentage_change = 0.0
+        direction = "N/A"
+        direction_symbol = "➖"
 
     # --------------------------------------------------------
     # Historical chart data
@@ -1194,22 +1348,20 @@ def dashboard():
 @app.route("/refresh-market")
 @login_required
 def refresh_market():
+    success = refresh_market_data()
 
-    try:
-
-        get_latest_tcs_data()
-
-        return redirect(
-            url_for("dashboard")
+    if success:
+        flash(
+            "Market data refreshed successfully.",
+            "success"
+        )
+    else:
+        flash(
+            "Unable to refresh market data. Showing stored data.",
+            "warning"
         )
 
-    except Exception as e:
-
-        print("Refresh error:", e)
-
-        return redirect(
-            url_for("dashboard")
-        )
+    return redirect(url_for("dashboard"))
 
 
 # ============================================================
