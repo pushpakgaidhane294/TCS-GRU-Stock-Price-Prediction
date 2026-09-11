@@ -31,7 +31,18 @@ except ImportError:  # pragma: no cover
 
 app = Flask(__name__)
 
-app.secret_key = "gru_stock_prediction_secret_key"
+app.config["SECRET_KEY"] = os.environ.get(
+    "SECRET_KEY",
+    "gru_stock_prediction_secret_key"
+)
+
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+if os.environ.get("RENDER"):
+    app.config["SESSION_COOKIE_SECURE"] = True
+else:
+    app.config["SESSION_COOKIE_SECURE"] = False
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -153,76 +164,60 @@ init_db()
 
 class User(UserMixin):
 
-    def __init__(self, user_id, username, name):
+    def __init__(self, user_id, username, name=None):
 
-        self.id = user_id
+        self.id = str(user_id)
         self.username = username
-        self.name = name
+        self.name = name or username
 
 
 @login_manager.user_loader
 def load_user(user_id):
 
+    print(f"Loading user from session: {user_id}")
+
     conn = get_db_connection()
 
-    columns = [
-        row["name"]
-        for row in conn.execute(
-            "PRAGMA table_info(users)"
-        ).fetchall()
-    ]
-
-    if "username" in columns:
+    try:
 
         user = conn.execute(
-            "SELECT * FROM users WHERE id = ?",
+            """
+            SELECT id, username, name
+            FROM users
+            WHERE id = ?
+            """,
             (user_id,)
         ).fetchone()
-
-        if user:
-
-            username = user["username"]
-
-        else:
-
-            conn.close()
-            return None
-
-    elif "email" in columns:
-
-        user = conn.execute(
-            "SELECT * FROM users WHERE id = ?",
-            (user_id,)
-        ).fetchone()
-
-        if user:
-
-            username = user["email"]
-
-        else:
-
-            conn.close()
-            return None
-
-    else:
 
         conn.close()
+
+        if user:
+
+            print(
+                f"Session user found: {user['username']}"
+            )
+
+            return User(
+                user["id"],
+                user["username"],
+                user["name"]
+            )
+
+        print(
+            f"Session user NOT found: {user_id}"
+        )
+
         return None
 
-    conn.close()
+    except Exception as e:
 
-    if user and "name" in user.keys():
-        full_name = user["name"]
-    elif user:
-        full_name = username
-    else:
+        conn.close()
+
+        print(
+            f"load_user error: {e}"
+        )
+
         return None
-
-    return User(
-        user["id"],
-        username,
-        full_name
-    )
 
 
 # ============================================================
@@ -949,10 +944,7 @@ def index():
 # ROUTE - LOGIN
 # ============================================================
 
-@app.route(
-    "/login",
-    methods=["GET", "POST"]
-)
+@app.route("/login", methods=["GET", "POST"])
 def login():
 
     if request.method == "POST":
@@ -960,96 +952,107 @@ def login():
         email = request.form.get(
             "email",
             ""
-        ).strip()
+        ).strip().lower()
 
         password = request.form.get(
             "password",
             ""
         )
 
-        conn = get_db_connection()
+        print(
+            f"LOGIN ATTEMPT: {email}"
+        )
 
-        columns = [
-            row["name"]
-            for row in conn.execute(
-                "PRAGMA table_info(users)"
-            ).fetchall()
-        ]
-
-        if "username" in columns:
-
-            user = conn.execute(
-                """
-                SELECT * FROM users
-                WHERE username = ?
-                """,
-                (email,)
-            ).fetchone()
-
-            username = (
-                user["username"]
-                if user
-                else None
-            )
-
-        elif "email" in columns:
-
-            user = conn.execute(
-                """
-                SELECT * FROM users
-                WHERE email = ?
-                """,
-                (email,)
-            ).fetchone()
-
-            username = (
-                user["email"]
-                if user
-                else None
-            )
-
-        else:
-
-            conn.close()
+        if not email or not password:
 
             return render_template(
                 "login.html",
-                error="Database structure is invalid."
+                error="Please enter email and password."
             )
 
-        conn.close()
+        conn = get_db_connection()
 
-        if user and check_password_hash(
-            user["password"],
-            password
-        ):
+        try:
 
-            display_name = (
-                user["name"]
-                if "name" in user.keys() and user["name"]
-                else username
+            user = conn.execute(
+                """
+                SELECT id, username, password, name
+                FROM users
+                WHERE LOWER(username) = ?
+                """,
+                (email,)
+            ).fetchone()
+
+            conn.close()
+
+            if user is None:
+
+                print(
+                    f"LOGIN FAILED: user not found - {email}"
+                )
+
+                return render_template(
+                    "login.html",
+                    error="Invalid email or password."
+                )
+
+            password_valid = check_password_hash(
+                user["password"],
+                password
             )
 
-            user_obj = User(
+            if not password_valid:
+
+                print(
+                    f"LOGIN FAILED: wrong password - {email}"
+                )
+
+                return render_template(
+                    "login.html",
+                    error="Invalid email or password."
+                )
+
+            logged_user = User(
                 user["id"],
-                username,
-                display_name
+                user["username"],
+                user["name"]
             )
 
-            login_user(user_obj)
+            login_user(
+                logged_user,
+                remember=False
+            )
+
+            print(
+                f"LOGIN SUCCESS: {email}"
+            )
+
+            print(
+                f"AUTHENTICATED BEFORE REDIRECT: "
+                f"{current_user.is_authenticated}"
+            )
 
             return redirect(
                 url_for("dashboard")
             )
 
-        return render_template(
-            "login.html",
-            error="Invalid email or password."
-        )
+        except Exception as e:
 
-    return render_template(
-        "login.html"
-    )
+            print(
+                f"LOGIN ERROR: {e}"
+            )
+
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+            return render_template(
+                "login.html",
+                error="Login failed. Please try again."
+            )
+
+    return render_template("login.html")
 
 
 # ============================================================
@@ -1147,8 +1150,29 @@ def logout():
 @login_required
 def dashboard():
 
+    print(
+        "DASHBOARD REQUEST"
+    )
+
+    print(
+        f"Authenticated: "
+        f"{current_user.is_authenticated}"
+    )
+
+    print(
+        f"User ID: "
+        f"{current_user.id}"
+    )
+
+    print(
+        f"Username: "
+        f"{current_user.username}"
+    )
+
     dashboard_data = get_dashboard_data()
-    prediction_history = get_prediction_history(current_user.id)
+    prediction_history = get_prediction_history(
+        current_user.id
+    )
 
     return render_template(
         "dashboard.html",
