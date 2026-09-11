@@ -1,0 +1,12 @@
+{
+  "ticker": "TCS.NS",
+  "latest_date": "11 Sep 2026",
+  "latest_price": 2200.8,
+  "predicted_price": 2268.69,
+  "difference": 67.89,
+  "percentage_change": 3.08,
+  "direction": "UP",
+  "direction_symbol": "📈",
+  "sequence_length": 60,
+  "generated_at": "2026-09-11T12:21:57.498173+00:00"
+}

@@ -27,18 +27,9 @@ import sqlite3
 import os
 import io
 import json
-import joblib
 import numpy as np
 import pandas as pd
 import yfinance as yf
-
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_squared_error
-)
-
-from tensorflow.keras.models import load_model
-
 
 # ============================================================
 # FLASK CONFIGURATION
@@ -73,11 +64,10 @@ login_manager.login_view = "login"
 # PROJECT PATHS
 # ============================================================
 
-MODEL_PATH = "model/gru_model.keras"
-SCALER_PATH = "model/scaler.pkl"
 DATA_PATH = "data/TCS_stock.csv"
 DATABASE = "database.db"
 EVALUATION_CACHE_PATH = "data/model_evaluation.json"
+LATEST_PREDICTION_PATH = "data/latest_prediction.json"
 
 MODEL_TRAIN_SIZE = 1580
 ORIGINAL_TEST_END = 1976
@@ -86,21 +76,18 @@ TICKER = "TCS.NS"
 
 
 # ============================================================
-# LOAD GRU MODEL
+# NOTE ABOUT GRU MODEL
+# ============================================================
+# The GRU model is intentionally NOT loaded by the Render Flask
+# server. TensorFlow inference caused worker timeouts/memory kills
+# on the small Render instance.
+#
+# The model is still used by generate_latest_prediction.py on the
+# local machine to create data/latest_prediction.json. The Flask
+# app only reads that lightweight JSON result.
 # ============================================================
 
-print("Loading GRU model...")
-
-# compile=False is enough because this application only predicts.
-# It reduces unnecessary model loading overhead.
-model = load_model(
-    MODEL_PATH,
-    compile=False
-)
-
-scaler = joblib.load(SCALER_PATH)
-
-print("GRU model loaded successfully.")
+print("Starting Flask application without TensorFlow inference...")
 
 
 # ============================================================
@@ -454,277 +441,11 @@ def get_prediction_history(
 
 
 # ============================================================
-# MODEL EVALUATION
+# MODEL EVALUATION NOTE
 # ============================================================
-
-def calculate_model_results():
-
-    global historical_data
-
-    data = historical_data[
-        "Close"
-    ].values.astype(
-        np.float32
-    ).reshape(
-        -1,
-        1
-    )
-
-    total_rows = len(data)
-
-    train_size = int(
-        total_rows * 0.80
-    )
-
-    train_data = data[
-        :train_size
-    ]
-
-    test_data = data[
-        train_size:
-    ]
-
-    # --------------------------------------------------------
-    # SCALE DATA
-    # --------------------------------------------------------
-
-    train_scaled = scaler.transform(
-        train_data
-    )
-
-    test_scaled = scaler.transform(
-        test_data
-    )
-
-    # --------------------------------------------------------
-    # ONLY CREATE TEST SEQUENCES
-    #
-    # The old code created X_train even though it was never
-    # used for prediction. That unnecessary work is removed.
-    # --------------------------------------------------------
-
-    combined_test = np.concatenate(
-        (
-            train_scaled[
-                -SEQUENCE_LENGTH:
-            ],
-            test_scaled
-        )
-    )
-
-    X_test = []
-
-    for i in range(
-        SEQUENCE_LENGTH,
-        len(combined_test)
-    ):
-
-        X_test.append(
-            combined_test[
-                i - SEQUENCE_LENGTH:i
-            ]
-        )
-
-    X_test = np.asarray(
-        X_test,
-        dtype=np.float32
-    )
-
-    y_test = np.asarray(
-        test_scaled,
-        dtype=np.float32
-    )
-
-    if len(X_test) == 0:
-
-        return (
-            0.0,
-            0.0,
-            np.array([]),
-            np.array([]),
-            pd.Series(dtype="datetime64[ns]")
-        )
-
-    # --------------------------------------------------------
-    # PREDICTION
-    # --------------------------------------------------------
-
-    predictions_scaled = model.predict(
-        X_test,
-        batch_size=32,
-        verbose=0
-    )
-
-    # --------------------------------------------------------
-    # INVERSE TRANSFORM
-    # --------------------------------------------------------
-
-    predictions = scaler.inverse_transform(
-        predictions_scaled
-    ).flatten()
-
-    actual = scaler.inverse_transform(
-        y_test.reshape(
-            -1,
-            1
-        )
-    ).flatten()
-
-    # --------------------------------------------------------
-    # METRICS
-    # --------------------------------------------------------
-
-    mae = mean_absolute_error(
-        actual,
-        predictions
-    )
-
-    rmse = np.sqrt(
-        mean_squared_error(
-            actual,
-            predictions
-        )
-    )
-
-    # --------------------------------------------------------
-    # DATES
-    # --------------------------------------------------------
-
-    test_dates_result = historical_data[
-        "Date"
-    ].iloc[
-        train_size:
-    ].reset_index(
-        drop=True
-    )
-
-    return (
-        float(mae),
-        float(rmse),
-        actual,
-        predictions,
-        test_dates_result
-    )
-
-
-# ============================================================
-# EXTENDED ACTUAL VS PREDICTED
-# ============================================================
-
-def calculate_extended_predictions():
-
-    global historical_data
-
-    if (
-        historical_data is None
-        or
-        len(historical_data) <= MODEL_TRAIN_SIZE
-    ):
-
-        return (
-            np.array([]),
-            np.array([]),
-            pd.Series(dtype="datetime64[ns]")
-        )
-
-    close_prices = historical_data[
-        "Close"
-    ].values.astype(
-        np.float32
-    ).reshape(
-        -1,
-        1
-    )
-
-    # Original training period remains fixed.
-    train_data = close_prices[
-        :MODEL_TRAIN_SIZE
-    ]
-
-    future_data = close_prices[
-        MODEL_TRAIN_SIZE:
-    ]
-
-    train_scaled = scaler.transform(
-        train_data
-    )
-
-    future_scaled = scaler.transform(
-        future_data
-    )
-
-    combined_scaled = np.concatenate(
-        [
-            train_scaled[
-                -SEQUENCE_LENGTH:
-            ],
-            future_scaled
-        ]
-    )
-
-    X_extended = []
-
-    for i in range(
-        SEQUENCE_LENGTH,
-        len(combined_scaled)
-    ):
-
-        X_extended.append(
-            combined_scaled[
-                i - SEQUENCE_LENGTH:i
-            ]
-        )
-
-    X_extended = np.asarray(
-        X_extended,
-        dtype=np.float32
-    )
-
-    if len(X_extended) == 0:
-
-        return (
-            np.array([]),
-            np.array([]),
-            pd.Series(dtype="datetime64[ns]")
-        )
-
-    predicted_scaled = model.predict(
-        X_extended,
-        batch_size=32,
-        verbose=0
-    )
-
-    predicted_prices_extended = (
-        scaler.inverse_transform(
-            predicted_scaled
-        )
-        .flatten()
-    )
-
-    actual_prices_extended = (
-        scaler.inverse_transform(
-            future_scaled
-        )
-        .flatten()
-    )
-
-    test_dates_extended = (
-        historical_data[
-            "Date"
-        ]
-        .iloc[
-            MODEL_TRAIN_SIZE:
-        ]
-        .reset_index(
-            drop=True
-        )
-    )
-
-    return (
-        actual_prices_extended,
-        predicted_prices_extended,
-        test_dates_extended
-    )
+# Evaluation metrics and actual-vs-predicted chart data are loaded
+# from data/model_evaluation.json. The Flask server never recalculates
+# them with TensorFlow.
 
 
 # ============================================================
@@ -1000,122 +721,63 @@ def refresh_market_data():
 
 
 # ============================================================
-# MAKE LATEST PREDICTION
+# LOAD LATEST PRECOMPUTED PREDICTION
 # ============================================================
 
-def make_latest_prediction(
-    recent_prices
-):
+def load_latest_prediction():
+    """Read the latest GRU prediction generated locally."""
+    if not os.path.exists(LATEST_PREDICTION_PATH):
+        print("Latest prediction file not found.")
+        return None
 
     try:
+        with open(LATEST_PREDICTION_PATH, "r", encoding="utf-8") as f:
+            prediction = json.load(f)
 
-        recent_prices = pd.to_numeric(
-            pd.Series(
-                recent_prices
-            ),
-            errors="coerce"
-        ).dropna().values.astype(
-            np.float32
-        )
+        required = [
+            "latest_date",
+            "latest_price",
+            "predicted_price",
+            "difference",
+            "percentage_change",
+            "direction"
+        ]
 
-        if len(recent_prices) < SEQUENCE_LENGTH:
+        if not all(key in prediction for key in required):
+            print("Latest prediction JSON is incomplete.")
+            return None
 
-            raise ValueError(
-                f"Need at least "
-                f"{SEQUENCE_LENGTH} prices "
-                f"for prediction."
-            )
-
-        recent_prices = (
-            recent_prices[
-                -SEQUENCE_LENGTH:
-            ]
-        )
-
-        scaled_prices = scaler.transform(
-            recent_prices.reshape(
-                -1,
-                1
-            )
-        )
-
-        X_latest = scaled_prices.reshape(
-            1,
-            SEQUENCE_LENGTH,
-            1
-        ).astype(
-            np.float32
-        )
-
-        predicted_scaled = model.predict(
-            X_latest,
-            batch_size=1,
-            verbose=0
-        )
-
-        predicted_price = (
-            scaler.inverse_transform(
-                predicted_scaled
-            )[0][0]
-        )
-
-        return float(
-            predicted_price
-        )
+        return prediction
 
     except Exception as e:
-
-        print(
-            "Latest prediction error:",
-            str(e)
-        )
-
+        print("Latest prediction file error:", str(e))
         return None
 
 
-# ============================================================
-# CACHED LATEST PREDICTION
-# ============================================================
-
-def get_cached_latest_prediction(
-    recent_prices,
-    latest_date
-):
-
+def refresh_prediction_cache_from_file():
+    """Load the JSON prediction into the small in-process cache."""
     global LATEST_PREDICTION_CACHE
 
-    # --------------------------------------------------------
-    # RETURN EXISTING PREDICTION
-    # --------------------------------------------------------
+    prediction = load_latest_prediction()
 
-    if (
-        LATEST_PREDICTION_CACHE["date"]
-        == latest_date
-        and
-        LATEST_PREDICTION_CACHE["price"]
-        is not None
-    ):
-
-        return float(
-            LATEST_PREDICTION_CACHE[
-                "price"
-            ]
-        )
-
-    # --------------------------------------------------------
-    # RUN GRU ONLY ONCE FOR THIS DATE
-    # --------------------------------------------------------
-
-    prediction = make_latest_prediction(
-        recent_prices
-    )
-
-    if prediction is not None:
-
+    if prediction is None:
         LATEST_PREDICTION_CACHE = {
-            "date": latest_date,
-            "price": float(prediction)
+            "date": None,
+            "price": None
         }
+        return None
+
+    try:
+        LATEST_PREDICTION_CACHE = {
+            "date": str(prediction["latest_date"]),
+            "price": float(prediction["predicted_price"])
+        }
+    except (TypeError, ValueError, KeyError):
+        LATEST_PREDICTION_CACHE = {
+            "date": None,
+            "price": None
+        }
+        return None
 
     return prediction
 
@@ -1174,62 +836,28 @@ def get_dashboard_data():
     )
 
     # --------------------------------------------------------
-    # IMPORTANT: dashboard never runs TensorFlow inference.
-    # Prediction is performed only by the /predict route.
+    # PRECOMPUTED GRU PREDICTION
     # --------------------------------------------------------
 
+    prediction_data = refresh_prediction_cache_from_file()
     predicted_price = None
 
-    if session.get("prediction_date") == latest_date:
+    if prediction_data is not None:
         try:
-            predicted_price = float(session.get("predicted_price"))
-        except (TypeError, ValueError):
+            predicted_price = float(prediction_data["predicted_price"])
+            price_difference = float(prediction_data["difference"])
+            percentage_change = float(prediction_data["percentage_change"])
+            direction = str(prediction_data["direction"])
+            direction_symbol = str(
+                prediction_data.get(
+                    "direction_symbol",
+                    "📈" if direction == "UP" else "📉" if direction == "DOWN" else "➖"
+                )
+            )
+        except (TypeError, ValueError, KeyError):
             predicted_price = None
 
-    if predicted_price is None and (
-        LATEST_PREDICTION_CACHE["date"] == latest_date
-        and LATEST_PREDICTION_CACHE["price"] is not None
-    ):
-        predicted_price = float(LATEST_PREDICTION_CACHE["price"])
-
-
-    # --------------------------------------------------------
-    # PRICE MOVEMENT
-    # --------------------------------------------------------
-
-    if predicted_price is not None:
-
-        price_difference = (
-            predicted_price -
-            current_price
-        )
-
-        percentage_change = (
-            (
-                price_difference /
-                current_price
-            ) * 100
-            if current_price
-            else 0.0
-        )
-
-        if predicted_price > current_price:
-
-            direction = "UP"
-            direction_symbol = "📈"
-
-        elif predicted_price < current_price:
-
-            direction = "DOWN"
-            direction_symbol = "📉"
-
-        else:
-
-            direction = "NEUTRAL"
-            direction_symbol = "➖"
-
-    else:
-
+    if predicted_price is None:
         predicted_price = current_price
         price_difference = 0.0
         percentage_change = 0.0
@@ -1408,6 +1036,7 @@ def get_dashboard_data():
 # ============================================================
 
 load_evaluation_cache()
+refresh_prediction_cache_from_file()
 
 # ============================================================
 # ROUTE - HOME
@@ -1747,55 +1376,67 @@ def refresh_market():
 )
 @login_required
 def predict():
+    """Display the latest GRU prediction generated offline."""
     latest_data = get_latest_tcs_data()
 
     latest_price = float(latest_data.get("latest_price", 0.0))
     latest_date = latest_data.get("latest_date", "")
-    recent_prices = latest_data.get("recent_prices", [])
 
-    if not latest_date or latest_price <= 0:
-        flash("Market data is not available for prediction.", "warning")
+    prediction_data = load_latest_prediction()
+
+    if prediction_data is None:
+        flash(
+            "No GRU prediction is available yet. Run "
+            "generate_latest_prediction.py locally, then deploy again.",
+            "warning"
+        )
         return redirect(url_for("dashboard"))
 
-    # The GRU model runs here, only when the user requests a prediction.
-    prediction = make_latest_prediction(recent_prices)
-
-    if prediction is None:
-        flash("Prediction failed. Please try again.", "warning")
+    try:
+        prediction_date = str(prediction_data["latest_date"])
+        prediction_source_price = float(prediction_data["latest_price"])
+        prediction = round(float(prediction_data["predicted_price"]), 2)
+        difference = round(float(prediction_data["difference"]), 2)
+        percentage_change = round(
+            float(prediction_data["percentage_change"]),
+            2
+        )
+        direction = str(prediction_data["direction"])
+        direction_symbol = str(
+            prediction_data.get(
+                "direction_symbol",
+                "📈" if direction == "UP" else "📉" if direction == "DOWN" else "➖"
+            )
+        )
+    except (TypeError, ValueError, KeyError) as e:
+        print("Prediction JSON parsing error:", str(e))
+        flash(
+            "The saved GRU prediction file is invalid. "
+            "Please regenerate it locally.",
+            "warning"
+        )
         return redirect(url_for("dashboard"))
 
-    prediction = round(float(prediction), 2)
-    difference = round(prediction - latest_price, 2)
-
-    if difference > 0:
-        direction = "UP"
-        direction_symbol = "📈"
-    elif difference < 0:
-        direction = "DOWN"
-        direction_symbol = "📉"
-    else:
-        direction = "NEUTRAL"
-        direction_symbol = "➖"
-
-    percentage_change = round(
-        (difference / latest_price) * 100, 2
-    ) if latest_price else 0.0
+    # Keep the prediction result internally consistent with the price
+    # used by the GRU generator. This prevents a mismatched percentage
+    # when the market CSV on Render is newer than the JSON file.
+    latest_price = prediction_source_price
 
     global LATEST_PREDICTION_CACHE
     LATEST_PREDICTION_CACHE = {
-        "date": latest_date,
+        "date": prediction_date,
         "price": prediction
     }
 
     session["predicted_price"] = prediction
-    session["prediction_date"] = latest_date
+    session["prediction_date"] = prediction_date
     session["difference"] = difference
     session["direction"] = direction
     session["percentage_change"] = percentage_change
 
     save_prediction_history(
         current_user.id,
-        latest_date,
+        prediction_date,
         latest_price,
         prediction,
         difference,
@@ -1804,6 +1445,8 @@ def predict():
     )
 
     dashboard_data = get_dashboard_data()
+    dashboard_data["latest_price"] = latest_price
+    dashboard_data["latest_date"] = prediction_date
     dashboard_data["predicted_price"] = prediction
     dashboard_data["price_difference"] = difference
     dashboard_data["percentage_change"] = percentage_change
