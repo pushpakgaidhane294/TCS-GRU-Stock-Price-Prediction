@@ -3,7 +3,7 @@ Flask-Login
 Werkzeug
 pandas
 numpy
-scikit-learn
+scikit-learn==1.9.0
 tensorflow
 yfinance
 joblib
