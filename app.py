@@ -26,6 +26,7 @@ from werkzeug.security import (
 import sqlite3
 import os
 import io
+import json
 import joblib
 import numpy as np
 import pandas as pd
@@ -76,6 +77,7 @@ MODEL_PATH = "model/gru_model.keras"
 SCALER_PATH = "model/scaler.pkl"
 DATA_PATH = "data/TCS_stock.csv"
 DATABASE = "database.db"
+EVALUATION_CACHE_PATH = "data/model_evaluation.json"
 
 MODEL_TRAIN_SIZE = 1580
 ORIGINAL_TEST_END = 1976
@@ -227,6 +229,26 @@ def init_db():
         """
     )
 
+    # Remove old duplicate rows, then enforce one prediction per user/date.
+    conn.execute(
+        """
+        DELETE FROM prediction_history
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM prediction_history
+            GROUP BY user_id, prediction_date
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS
+        idx_prediction_history_user_date
+        ON prediction_history(user_id, prediction_date)
+        """
+    )
+
     conn.commit()
     conn.close()
 
@@ -333,6 +355,39 @@ def calculate_prediction_accuracy(
 
 
 # ============================================================
+# LOAD PRECOMPUTED MODEL EVALUATION
+# ============================================================
+
+def load_evaluation_cache():
+    """Load evaluation results without running TensorFlow."""
+    global MAE, RMSE, PREDICTION_ACCURACY
+    global actual_prices, predicted_prices, test_dates
+
+    if not os.path.exists(EVALUATION_CACHE_PATH):
+        print("Evaluation cache not found; comparison chart will be empty.")
+        return
+
+    try:
+        with open(EVALUATION_CACHE_PATH, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+
+        MAE = float(cached.get("mae", 0.0))
+        RMSE = float(cached.get("rmse", 0.0))
+        PREDICTION_ACCURACY = float(cached.get("accuracy", 0.0))
+        actual_prices = np.asarray(cached.get("actual_prices", []), dtype=float)
+        predicted_prices = np.asarray(cached.get("predicted_prices", []), dtype=float)
+        test_dates = pd.to_datetime(
+            pd.Series(cached.get("test_dates", [])), errors="coerce"
+        ).dropna().reset_index(drop=True)
+
+        print(f"Model MAE: ₹{MAE:.2f}")
+        print(f"Model RMSE: ₹{RMSE:.2f}")
+        print(f"Prediction Accuracy: {PREDICTION_ACCURACY:.2f}%")
+    except Exception as e:
+        print(f"Evaluation cache load error: {e}")
+
+
+# ============================================================
 # PREDICTION HISTORY
 # ============================================================
 
@@ -345,54 +400,25 @@ def save_prediction_history(
     percentage_change,
     direction
 ):
-
     conn = get_db_connection()
-
-    existing = conn.execute(
-        """
-        SELECT id
-        FROM prediction_history
-        WHERE user_id = ?
-        AND prediction_date = ?
-        """,
-        (
-            user_id,
-            prediction_date
+    try:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO prediction_history
+            (
+                user_id, prediction_date, latest_price,
+                predicted_price, difference, percentage_change, direction
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id, prediction_date, latest_price,
+                predicted_price, difference, percentage_change, direction
+            )
         )
-    ).fetchone()
-
-    if existing:
-
+        conn.commit()
+    finally:
         conn.close()
-        return
-
-    conn.execute(
-        """
-        INSERT INTO prediction_history
-        (
-            user_id,
-            prediction_date,
-            latest_price,
-            predicted_price,
-            difference,
-            percentage_change,
-            direction
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            prediction_date,
-            latest_price,
-            predicted_price,
-            difference,
-            percentage_change,
-            direction
-        )
-    )
-
-    conn.commit()
-    conn.close()
 
 
 def get_prediction_history(
@@ -945,19 +971,6 @@ def refresh_market_data():
             "price": None
         }
 
-        # ----------------------------------------------------
-        # UPDATE ACTUAL VS PREDICTED GRAPH
-        #
-        # This expensive operation happens ONLY when the user
-        # clicks Refresh Market Data.
-        # ----------------------------------------------------
-
-        (
-            actual_prices,
-            predicted_prices,
-            test_dates
-        ) = calculate_extended_predictions()
-
         print(
             "Market data refreshed successfully."
         )
@@ -1161,16 +1174,24 @@ def get_dashboard_data():
     )
 
     # --------------------------------------------------------
-    # IMPORTANT:
-    # Prediction is now calculated ONLY ONCE.
+    # IMPORTANT: dashboard never runs TensorFlow inference.
+    # Prediction is performed only by the /predict route.
     # --------------------------------------------------------
 
-    predicted_price = (
-        get_cached_latest_prediction(
-            recent_prices,
-            latest_date
-        )
-    )
+    predicted_price = None
+
+    if session.get("prediction_date") == latest_date:
+        try:
+            predicted_price = float(session.get("predicted_price"))
+        except (TypeError, ValueError):
+            predicted_price = None
+
+    if predicted_price is None and (
+        LATEST_PREDICTION_CACHE["date"] == latest_date
+        and LATEST_PREDICTION_CACHE["price"] is not None
+    ):
+        predicted_price = float(LATEST_PREDICTION_CACHE["price"])
+
 
     # --------------------------------------------------------
     # PRICE MOVEMENT
@@ -1383,41 +1404,10 @@ def get_dashboard_data():
 
 
 # ============================================================
-# CALCULATE MODEL RESULTS ONCE
+# LOAD MODEL EVALUATION WITHOUT RUNNING TENSORFLOW
 # ============================================================
 
-print(
-    "Calculating model evaluation..."
-)
-
-(
-    MAE,
-    RMSE,
-    actual_prices,
-    predicted_prices,
-    test_dates
-) = calculate_model_results()
-
-PREDICTION_ACCURACY = (
-    calculate_prediction_accuracy(
-        actual_prices,
-        predicted_prices
-    )
-)
-
-print(
-    f"Model MAE: ₹{MAE:.2f}"
-)
-
-print(
-    f"Model RMSE: ₹{RMSE:.2f}"
-)
-
-print(
-    f"Prediction Accuracy: "
-    f"{PREDICTION_ACCURACY:.2f}%"
-)
-
+load_evaluation_cache()
 
 # ============================================================
 # ROUTE - HOME
@@ -1757,83 +1747,55 @@ def refresh_market():
 )
 @login_required
 def predict():
+    latest_data = get_latest_tcs_data()
 
-    dashboard_data = (
-        get_dashboard_data()
-    )
+    latest_price = float(latest_data.get("latest_price", 0.0))
+    latest_date = latest_data.get("latest_date", "")
+    recent_prices = latest_data.get("recent_prices", [])
 
-    prediction = round(
-        float(
-            dashboard_data.get(
-                "predicted_price",
-                0
-            )
-        ),
-        2
-    )
+    if not latest_date or latest_price <= 0:
+        flash("Market data is not available for prediction.", "warning")
+        return redirect(url_for("dashboard"))
 
-    session[
-        "predicted_price"
-    ] = prediction
+    # The GRU model runs here, only when the user requests a prediction.
+    prediction = make_latest_prediction(recent_prices)
 
-    latest_price = float(
-        dashboard_data.get(
-            "latest_price",
-            0
-        )
-    )
+    if prediction is None:
+        flash("Prediction failed. Please try again.", "warning")
+        return redirect(url_for("dashboard"))
 
-    difference = round(
-        prediction -
-        latest_price,
-        2
-    )
+    prediction = round(float(prediction), 2)
+    difference = round(prediction - latest_price, 2)
 
     if difference > 0:
-
         direction = "UP"
-
+        direction_symbol = "📈"
     elif difference < 0:
-
         direction = "DOWN"
-
+        direction_symbol = "📉"
     else:
-
         direction = "NEUTRAL"
+        direction_symbol = "➖"
 
     percentage_change = round(
-        (
-            difference /
-            latest_price
-        ) * 100,
-        2
+        (difference / latest_price) * 100, 2
     ) if latest_price else 0.0
 
-    session[
-        "difference"
-    ] = difference
+    global LATEST_PREDICTION_CACHE
+    LATEST_PREDICTION_CACHE = {
+        "date": latest_date,
+        "price": prediction
+    }
 
-    session[
-        "direction"
-    ] = direction
-
-    session[
-        "percentage_change"
-    ] = percentage_change
-
-    dashboard_data[
-        "predicted_price"
-    ] = prediction
-
-    prediction_date = (
-        dashboard_data.get(
-            "latest_date"
-        )
-    )
+    session["predicted_price"] = prediction
+    session["prediction_date"] = latest_date
+    session["difference"] = difference
+    session["direction"] = direction
+    session["percentage_change"] = percentage_change
 
     save_prediction_history(
         current_user.id,
-        prediction_date,
+        latest_date,
         latest_price,
         prediction,
         difference,
@@ -1841,11 +1803,14 @@ def predict():
         direction
     )
 
-    prediction_history = (
-        get_prediction_history(
-            current_user.id
-        )
-    )
+    dashboard_data = get_dashboard_data()
+    dashboard_data["predicted_price"] = prediction
+    dashboard_data["price_difference"] = difference
+    dashboard_data["percentage_change"] = percentage_change
+    dashboard_data["direction"] = direction
+    dashboard_data["direction_symbol"] = direction_symbol
+
+    prediction_history = get_prediction_history(current_user.id)
 
     return render_template(
         "dashboard.html",
@@ -1883,6 +1848,15 @@ def download_historical():
             "TCS_historical_data.csv"
         )
     )
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route("/health")
+def health():
+    return "OK", 200
 
 
 # ============================================================
