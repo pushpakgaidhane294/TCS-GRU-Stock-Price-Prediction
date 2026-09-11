@@ -1,9 +1,8 @@
-````markdown
 # 📈 TCS Stock Price Prediction Using GRU
 
 A machine learning web application that predicts the **next trading day's TCS stock closing price** using a **Gated Recurrent Unit (GRU)** deep learning model.
 
-The project uses historical TCS stock data from **Yahoo Finance**, trains a GRU-based neural network, and provides a Flask web dashboard where users can log in, view stock information, generate predictions, and analyze model performance.
+The project uses historical TCS stock data from **Yahoo Finance**, trains a GRU-based neural network, and provides a **Flask web dashboard** where users can log in, view stock information, generate predictions, and analyze model performance.
 
 ---
 
@@ -13,61 +12,58 @@ Stock prices are time-series data because their values depend on previous observ
 
 In this project, a **GRU (Gated Recurrent Unit)** neural network is used to learn patterns from historical TCS stock closing prices and predict the expected closing price for the next trading day.
 
-The project includes:
+### Main Features
 
 - Historical TCS stock data
 - GRU deep learning model
 - Data preprocessing and normalization
-- Next-day stock price prediction
-- UP/DOWN movement prediction
+- Next trading day stock price prediction
+- UP / DOWN / NEUTRAL movement prediction
 - Expected percentage movement
-- MAE and RMSE evaluation
+- MAE and RMSE model evaluation
 - Historical stock price visualization
-- Actual vs predicted visualization
+- Actual vs Predicted visualization
 - User registration and login
 - SQLite database
 - Prediction history
-- Flask web application
-- Yahoo Finance data refresh
-- CSV download
+- Flask web dashboard
+- Yahoo Finance market-data refresh
+- Historical CSV download
 - Render deployment
 
 ---
 
 # 🎯 Objectives
 
-The main objectives of this project are:
-
-1. To collect historical TCS stock price data.
-2. To preprocess and normalize the stock price data.
-3. To use a GRU neural network for time-series prediction.
-4. To predict the next trading day's TCS closing price.
-5. To determine whether the expected movement is UP or DOWN.
-6. To calculate the expected percentage movement.
-7. To evaluate the performance of the GRU model.
-8. To provide an interactive web interface using Flask.
-9. To maintain user login and prediction history.
-10. To deploy the application online.
+1. Collect historical TCS stock price data.
+2. Preprocess and normalize the stock price data.
+3. Create time-series sequences for the GRU model.
+4. Train a GRU neural network.
+5. Predict the next trading day's TCS closing price.
+6. Determine the expected UP / DOWN movement.
+7. Calculate the expected percentage movement.
+8. Evaluate the model using MAE and RMSE.
+9. Provide an interactive Flask web application.
+10. Store user accounts and prediction history.
+11. Deploy the application online using Render.
 
 ---
 
 # 🧠 Why GRU?
 
-GRU stands for **Gated Recurrent Unit**.
-
-GRU is a type of Recurrent Neural Network (RNN) designed for sequential and time-series data.
+**GRU (Gated Recurrent Unit)** is a type of Recurrent Neural Network (RNN) designed for sequential and time-series data.
 
 Stock prices form a sequence:
 
 ```text
 Day 1 → Day 2 → Day 3 → Day 4 → ... → Day N
-````
+```
 
-The previous stock prices can contain information useful for predicting future prices.
+The previous stock prices contain information that can be useful for predicting future prices.
 
 GRU uses gates to control how much previous information should be remembered or forgotten.
 
-Compared with a traditional RNN, GRU can handle long-term dependencies more effectively and is generally simpler than LSTM because it uses fewer gates.
+Compared with a traditional RNN, GRU can handle long-term dependencies more effectively and has a simpler architecture than LSTM.
 
 ---
 
@@ -92,32 +88,40 @@ Model Evaluation
       ↓
 Save Trained Model
       ↓
+Generate Latest Prediction
+      ↓
+latest_prediction.json
+      ↓
 Flask Web Application
       ↓
-Latest TCS Data
-      ↓
-Next Trading Day Prediction
-      ↓
-UP / DOWN Movement
-      ↓
 Dashboard
+      ↓
+UP / DOWN Prediction
 ```
 
 ---
 
 # 📊 Dataset
 
-The project uses TCS stock data with the Yahoo Finance ticker:
+The project uses TCS stock data from Yahoo Finance.
+
+### Yahoo Finance Ticker
 
 ```text
 TCS.NS
 ```
 
-The historical dataset contains:
+### Dataset Columns
 
 ```text
 Date
 Close
+```
+
+The dataset is stored at:
+
+```text
+data/TCS_stock.csv
 ```
 
 Example:
@@ -130,66 +134,61 @@ Date        Close
 ...
 ```
 
-The dataset is stored in:
-
-```text
-data/TCS_stock.csv
-```
-
-The application can also refresh recent market data using Yahoo Finance.
+Recent market data can also be refreshed using Yahoo Finance.
 
 ---
 
 # 🔧 Technologies Used
 
-## Programming Language
+### Programming Language
 
-* Python 3.11
+- Python 3.11
 
-## Machine Learning
+### Machine Learning
 
-* TensorFlow
-* Keras
-* GRU
-* NumPy
-* Pandas
-* Scikit-learn
+- TensorFlow
+- Keras
+- GRU
+- NumPy
+- Pandas
+- Scikit-learn
 
-## Data Source
+### Data Source
 
-* Yahoo Finance
-* yfinance
+- Yahoo Finance
+- yfinance
 
-## Web Development
+### Web Development
 
-* Flask
-* HTML
-* CSS
-* JavaScript
+- Flask
+- HTML
+- CSS
+- JavaScript
+- Chart.js
 
-## Authentication
+### Authentication
 
-* Flask-Login
-* Werkzeug password hashing
+- Flask-Login
+- Werkzeug password hashing
 
-## Database
+### Database
 
-* SQLite
+- SQLite
 
-## Visualization
+### Visualization
 
-* Matplotlib
-* Chart.js
+- Matplotlib
+- Chart.js
 
-## Deployment
+### Deployment
 
-* Gunicorn
-* Render
+- Gunicorn
+- Render
 
-## Version Control
+### Version Control
 
-* Git
-* GitHub
+- Git
+- GitHub
 
 ---
 
@@ -239,40 +238,61 @@ GRU-Stock-Prediction/
 
 # 📌 Important Files
 
-## `download_data.py`
+### `download_data.py`
 
 Downloads historical TCS stock data from Yahoo Finance.
 
----
+### `explore_data.py`
 
-## `explore_data.py`
+Used to inspect the dataset, including:
 
-Used to inspect the downloaded dataset and understand:
+- Number of records
+- Columns
+- Date range
+- Missing values
+- Basic statistics
 
-* Number of records
-* Columns
-* Date range
-* Missing values
-* Basic statistics
+### `preprocess_data.py`
 
----
+Prepares the stock data for GRU training by:
 
-## `preprocess_data.py`
+- Selecting closing prices
+- Normalizing values
+- Creating time-series sequences
+- Preparing training and testing data
 
-Prepares the stock data for GRU training.
-
-Main preprocessing steps include:
-
-* Selecting closing prices
-* Normalizing values
-* Creating time-series sequences
-* Preparing training and testing data
-
----
-
-## `train.py`
+### `train.py`
 
 Builds and trains the GRU model.
+
+### `generate_graphs.py`
+
+Generates the historical price and actual-vs-predicted graphs.
+
+### `generate_evaluation_cache.py`
+
+Stores model evaluation results in JSON format so that the Flask application does not need to recalculate the complete evaluation every time.
+
+### `generate_latest_prediction.py`
+
+Runs the trained GRU model locally and generates the latest prediction.
+
+### `app.py`
+
+Runs the Flask web application and provides:
+
+- Login
+- Registration
+- Dashboard
+- Prediction results
+- Prediction history
+- Market refresh
+- CSV download
+- Health check
+
+---
+
+# 🧠 GRU Model Architecture
 
 The model architecture is:
 
@@ -316,35 +336,31 @@ The model uses the previous:
 
 to predict the next trading day's closing price.
 
-For example:
-
 ```text
-Previous 60 closing prices
-          ↓
-      GRU Model
-          ↓
+Previous 60 Closing Prices
+            ↓
+        GRU Model
+            ↓
 Next Trading Day Price
 ```
 
-This gives the model a sequence of historical information instead of using only one previous price.
+Using multiple previous observations allows the model to learn patterns from a sequence rather than relying on only one previous price.
 
 ---
 
 # 📈 Model Evaluation
 
-The model is evaluated using:
+The model is evaluated using **MAE** and **RMSE**.
 
 ## MAE
 
-Mean Absolute Error measures the average absolute difference between the actual and predicted values.
+Mean Absolute Error measures the average absolute difference between actual and predicted values.
 
 ```text
 MAE = Average(|Actual - Predicted|)
 ```
 
 A lower MAE generally indicates better prediction performance.
-
----
 
 ## RMSE
 
@@ -356,99 +372,70 @@ RMSE = √(Average((Actual - Predicted)²))
 
 A lower RMSE generally indicates better performance.
 
----
-
-## Prediction Accuracy
-
-The project also calculates an accuracy-style value based on the mean absolute percentage error.
-
 The evaluation results are stored in:
 
 ```text
 data/model_evaluation.json
 ```
 
-This allows the Flask application to display the model evaluation results without recalculating the entire test set every time the website starts.
-
 ---
 
 # ⚡ Next Trading Day Prediction
 
-The application predicts the expected closing price for the next trading day.
+The application predicts the expected closing price for the next trading day using the latest 60 available closing prices.
 
-The prediction uses the latest 60 available closing prices.
-
-Example:
+The prediction process is:
 
 ```text
-Current Price       : ₹3,089.89
-Predicted Price     : ₹3,142.76
-Expected Movement   : +1.71%
-Direction            : UP
+Latest TCS Data
+      ↓
+Last 60 Closing Prices
+      ↓
+Data Scaling
+      ↓
+GRU Model
+      ↓
+Predicted Price
+      ↓
+UP / DOWN / NEUTRAL
 ```
-
-The actual values are generated by the trained GRU model.
 
 ---
 
 # 📊 UP / DOWN Prediction
 
-The application compares:
-
-```text
-Predicted Price
-      vs
-Current Price
-```
-
-### If:
+The application compares the predicted price with the latest available price.
 
 ```text
 Predicted Price > Current Price
+        ↓
+       📈 UP
 ```
-
-the direction is:
-
-```text
-📈 UP
-```
-
-### If:
 
 ```text
 Predicted Price < Current Price
+        ↓
+      📉 DOWN
 ```
-
-the direction is:
-
-```text
-📉 DOWN
-```
-
-### If:
 
 ```text
 Predicted Price = Current Price
-```
-
-the direction is:
-
-```text
-➖ NEUTRAL
+        ↓
+     ➖ NEUTRAL
 ```
 
 ---
 
 # 📐 Expected Movement
 
-The expected percentage movement is calculated as:
+The expected percentage movement is calculated using:
 
 ```text
 Percentage Change =
 ((Predicted Price - Current Price) / Current Price) × 100
 ```
 
-For example:
+Example:
 
 ```text
 Current Price = ₹3000
@@ -473,11 +460,12 @@ Direction = UP
 
 The Flask application provides:
 
-* User registration
-* User login
-* Password hashing
-* Session management
-* Logout
+- User registration
+- User login
+- Password hashing
+- Session management
+- Logout
+- Protected dashboard routes
 
 Authentication is implemented using:
 
@@ -485,7 +473,7 @@ Authentication is implemented using:
 Flask-Login
 ```
 
-Passwords are securely stored using Werkzeug password hashing rather than storing plain-text passwords.
+Passwords are stored using Werkzeug password hashing instead of plain-text passwords.
 
 ---
 
@@ -493,15 +481,13 @@ Passwords are securely stored using Werkzeug password hashing rather than storin
 
 SQLite is used to store application data.
 
-The database file is:
+Database file:
 
 ```text
 database.db
 ```
 
-The application stores:
-
-## Users
+### Users
 
 ```text
 id
@@ -510,7 +496,7 @@ password
 name
 ```
 
-## Prediction History
+### Prediction History
 
 ```text
 user_id
@@ -523,43 +509,35 @@ direction
 created_at
 ```
 
-This allows users to see their previous predictions.
+This allows users to view their previous prediction results.
 
 ---
 
 # 🌐 Flask Dashboard
 
-The dashboard provides information such as:
+The dashboard provides:
 
-* Current TCS price
-* Latest available date
-* Predicted next-day price
-* Expected movement
-* UP/DOWN direction
-* Model accuracy
-* MAE
-* RMSE
-* Historical price chart
-* Actual vs predicted chart
-* Prediction history
-* Market data refresh
-* Historical CSV download
+- Current TCS price
+- Latest available date
+- Predicted next-day price
+- Expected percentage movement
+- UP / DOWN / NEUTRAL direction
+- Model accuracy
+- MAE
+- RMSE
+- Historical price chart
+- Actual vs Predicted chart
+- Prediction history
+- Market data refresh
+- Historical CSV download
 
 ---
 
 # 🔄 Refresh Market Data
 
-The application provides a market refresh option.
+The application can retrieve recent TCS data from Yahoo Finance.
 
-When the user selects:
-
-```text
-Refresh Market Data
-```
-
-the Flask application retrieves recent TCS data from Yahoo Finance.
-
-The data is merged with the existing historical dataset and duplicate dates are removed.
+The refreshed data is merged with the existing dataset and duplicate dates are removed.
 
 The updated dataset is stored in:
 
@@ -571,49 +549,49 @@ data/TCS_stock.csv
 
 # ⚙️ Offline Prediction Architecture
 
-To make the deployed application more stable on a limited server environment, the heavy GRU inference is performed separately using:
+To make the deployed Flask application lightweight and stable, the heavy TensorFlow GRU inference is performed separately using:
 
 ```text
 generate_latest_prediction.py
 ```
 
-The generated prediction is stored in:
+The prediction result is saved as:
 
 ```text
 data/latest_prediction.json
 ```
 
-The Flask web application reads this lightweight JSON result instead of running TensorFlow inference during the web request.
+The Flask application reads this lightweight JSON file instead of running TensorFlow inference during every web request.
 
-The architecture is:
+### Architecture
 
 ```text
-TCS Data
-   ↓
+TCS Market Data
+      ↓
 GRU Model
-   ↓
+      ↓
 generate_latest_prediction.py
-   ↓
+      ↓
 latest_prediction.json
-   ↓
+      ↓
 GitHub
-   ↓
+      ↓
 Render
-   ↓
-Flask Dashboard
-   ↓
+      ↓
+Flask Application
+      ↓
+Dashboard
+      ↓
 Prediction Result
 ```
 
-This prevents the production Flask worker from performing heavy TensorFlow inference for every prediction request.
+This separates the heavy machine-learning prediction process from the production web server.
 
 ---
 
 # 🧪 Generate Latest Prediction
 
 Activate the virtual environment:
-
-## Windows
 
 ```powershell
 venv\Scripts\activate
@@ -625,7 +603,7 @@ Run:
 python generate_latest_prediction.py
 ```
 
-This script:
+The script:
 
 1. Downloads recent TCS data.
 2. Updates the historical dataset.
@@ -633,14 +611,10 @@ This script:
 4. Loads the scaler.
 5. Takes the latest 60 closing prices.
 6. Generates the next trading day prediction.
-7. Calculates price difference.
+7. Calculates the price difference.
 8. Calculates percentage movement.
-9. Determines UP/DOWN/NEUTRAL.
-10. Saves the result to:
-
-```text
-data/latest_prediction.json
-```
+9. Determines UP / DOWN / NEUTRAL.
+10. Saves the result to `data/latest_prediction.json`.
 
 ---
 
@@ -652,15 +626,11 @@ data/latest_prediction.json
 cd C:\Users\pushp\GRU-Stock-Prediction
 ```
 
----
-
-## Step 2: Activate virtual environment
+## Step 2: Activate the virtual environment
 
 ```powershell
 venv\Scripts\activate
 ```
-
----
 
 ## Step 3: Install dependencies
 
@@ -668,15 +638,11 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
----
-
-## Step 4: Generate latest prediction
+## Step 4: Generate the latest prediction
 
 ```powershell
 python generate_latest_prediction.py
 ```
-
----
 
 ## Step 5: Start Flask
 
@@ -684,11 +650,7 @@ python generate_latest_prediction.py
 python app.py
 ```
 
----
-
 ## Step 6: Open the website
-
-Open:
 
 ```text
 http://127.0.0.1:5000
@@ -724,30 +686,28 @@ pip install -r requirements.txt
 
 # ☁️ Deployment on Render
 
-The application is deployed using:
-
-```text
-Render
-```
+The Flask application is deployed using **Render**.
 
 Gunicorn is used as the production WSGI server.
 
-The start command is:
+### Start Command
 
 ```text
 gunicorn app:app
 ```
 
-The Python version is specified using:
+### Python Version
 
-```text
-.python-version
-```
-
-Current Python version:
+The project uses:
 
 ```text
 3.11.8
+```
+
+The version is specified in:
+
+```text
+.python-version
 ```
 
 ---
@@ -756,49 +716,50 @@ Current Python version:
 
 ```text
 Local Project
-     ↓
+      ↓
 Git
-     ↓
+      ↓
 GitHub
-     ↓
+      ↓
 Render
-     ↓
+      ↓
 Build
-     ↓
+      ↓
 Gunicorn
-     ↓
+      ↓
 Flask Application
-     ↓
+      ↓
 Online Dashboard
 ```
 
-After generating a new prediction:
+After generating a new prediction locally:
 
 ```powershell
 python generate_latest_prediction.py
 ```
 
-Commit the updated prediction file:
+Commit the updated files:
 
 ```powershell
 git add data/latest_prediction.json
+git add data/TCS_stock.csv
 git commit -m "Update latest TCS prediction"
 git push origin main
 ```
 
-Render automatically deploys the latest GitHub version if automatic deployment is enabled.
+Render can automatically deploy the latest GitHub version when automatic deployment is enabled.
 
 ---
 
 # ❤️ Health Check
 
-The Flask application provides:
+The Flask application provides a health-check endpoint:
 
 ```text
 /health
 ```
 
-For example:
+Example:
 
 ```text
 https://your-render-app.onrender.com/health
@@ -816,15 +777,13 @@ This endpoint can be used to check whether the Flask server is running.
 
 # 📊 Visualizations
 
-The project includes:
-
 ## Historical Price Chart
 
 ```text
 data/tcs_historical_price.png
 ```
 
-This shows the historical movement of TCS closing prices.
+Shows the historical movement of TCS closing prices.
 
 ## Actual vs Predicted Chart
 
@@ -832,47 +791,47 @@ This shows the historical movement of TCS closing prices.
 data/actual_vs_predicted.png
 ```
 
-This compares actual stock prices with prices predicted by the GRU model during evaluation.
+Compares actual stock prices with prices predicted by the GRU model during evaluation.
 
 ---
 
 # 🔒 Security
 
-The project includes basic application security features:
+The application includes:
 
-* Login authentication
-* Password hashing
-* Session-based authentication
-* Protected dashboard routes
-* Protected prediction routes
-* Protected CSV download
-* HTTP-only session cookies
-* Secure session cookies when deployed with Render
+- Login authentication
+- Password hashing
+- Session-based authentication
+- Protected dashboard routes
+- Protected prediction routes
+- Protected CSV download
+- HTTP-only session cookies
+- Secure session cookies when deployed with Render
 
 ---
 
 # 💡 Key Features
 
-| Feature           | Description                         |
-| ----------------- | ----------------------------------- |
-| GRU Model         | Predicts future TCS closing price   |
-| 60-Day Sequence   | Uses previous 60 trading days       |
-| Yahoo Finance     | Provides stock market data          |
-| Flask             | Web application framework           |
-| Login/Register    | User authentication                 |
-| SQLite            | Stores users and prediction history |
-| UP/DOWN           | Predicts expected direction         |
-| Expected Movement | Calculates percentage change        |
-| MAE               | Measures average prediction error   |
-| RMSE              | Measures larger prediction errors   |
-| Charts            | Visualizes stock data               |
-| CSV Download      | Downloads historical data           |
-| Market Refresh    | Retrieves recent TCS data           |
-| Render            | Online deployment                   |
+| Feature | Description |
+|---|---|
+| GRU Model | Predicts future TCS closing price |
+| 60-Day Sequence | Uses previous 60 trading days |
+| Yahoo Finance | Provides stock market data |
+| Flask | Web application framework |
+| Login/Register | User authentication |
+| SQLite | Stores users and prediction history |
+| UP/DOWN | Predicts expected direction |
+| Expected Movement | Calculates percentage change |
+| MAE | Measures average prediction error |
+| RMSE | Measures larger prediction errors |
+| Charts | Visualizes stock data |
+| CSV Download | Downloads historical data |
+| Market Refresh | Retrieves recent TCS data |
+| Render | Online deployment |
 
 ---
 
-# 🧠 Advantages of the Project
+# 🧠 Advantages
 
 1. Uses deep learning for time-series prediction.
 2. GRU is suitable for sequential stock data.
@@ -883,7 +842,7 @@ The project includes basic application security features:
 7. Uses real stock-market data.
 8. Provides UP/DOWN movement information.
 9. Separates heavy ML processing from the production web server.
-10. Can be accessed through an online deployment.
+10. Can be deployed online.
 
 ---
 
@@ -893,16 +852,16 @@ Stock prices are affected by many external factors.
 
 The model mainly learns patterns from historical price data.
 
-It does not directly consider factors such as:
+It does not directly consider:
 
-* Company announcements
-* News
-* Global economic conditions
-* Market sentiment
-* Political events
-* Unexpected market events
-* Trading volume
-* Technical indicators not included in the model
+- Company announcements
+- News
+- Global economic conditions
+- Market sentiment
+- Political events
+- Unexpected market events
+- Trading volume
+- Technical indicators not included in the model
 
 Therefore, the prediction should be considered a **machine learning estimate**, not a guaranteed future stock price.
 
@@ -912,53 +871,53 @@ Therefore, the prediction should be considered a **machine learning estimate**, 
 
 The project can be improved by adding:
 
-* Multiple stock support
-* Technical indicators
-* Moving averages
-* RSI
-* MACD
-* Trading volume
-* News sentiment analysis
-* Financial-news integration
-* More advanced GRU/LSTM architectures
-* Transformer-based time-series models
-* Real-time market APIs
-* Automatic scheduled prediction generation
-* Cloud database
-* Portfolio tracking
-* Prediction confidence score
-* Mobile-friendly dashboard
-* Advanced model comparison
+- Multiple stock support
+- Technical indicators
+- Moving averages
+- RSI
+- MACD
+- Trading volume
+- News sentiment analysis
+- Financial-news integration
+- Advanced GRU/LSTM architectures
+- Transformer-based time-series models
+- Real-time market APIs
+- Automatic scheduled prediction generation
+- Cloud database
+- Portfolio tracking
+- Prediction confidence score
+- Mobile-friendly dashboard
+- Advanced model comparison
 
 ---
 
 # 🎓 Academic Project
 
-## Project Title
+### Project Title
 
 **Stock Price Prediction Using GRU**
 
-## Domain
+### Domain
 
 **Artificial Intelligence and Machine Learning**
 
-## Problem Type
+### Problem Type
 
 **Time-Series Forecasting**
 
-## Model
+### Model
 
 **Gated Recurrent Unit (GRU)**
 
-## Dataset
+### Dataset
 
 **TCS Stock Market Data**
 
-## Web Framework
+### Web Framework
 
 **Flask**
 
-## Deployment
+### Deployment
 
 **Render**
 
@@ -968,19 +927,19 @@ The project can be improved by adding:
 
 My contribution to the project includes:
 
-* Collecting and preprocessing TCS stock data
-* Implementing the GRU model
-* Training the deep learning model
-* Evaluating model performance
-* Integrating the trained model with Flask
-* Developing the login and registration system
-* Developing the prediction dashboard
-* Implementing UP/DOWN movement calculation
-* Implementing prediction history
-* Creating data visualizations
-* Integrating Yahoo Finance data refresh
-* Implementing offline prediction generation for deployment
-* Deploying the Flask application using Render
+- Collecting and preprocessing TCS stock data
+- Implementing the GRU model
+- Training the deep learning model
+- Evaluating model performance
+- Integrating the model with Flask
+- Developing the login and registration system
+- Developing the prediction dashboard
+- Implementing UP/DOWN movement calculation
+- Implementing prediction history
+- Creating data visualizations
+- Integrating Yahoo Finance data refresh
+- Implementing offline prediction generation
+- Deploying the Flask application using Render
 
 ---
 
@@ -1001,5 +960,3 @@ This project demonstrates how a **GRU deep learning model** can be applied to st
 The trained model is integrated with a **Flask web application** that provides authentication, market-data visualization, prediction results, UP/DOWN movement, prediction history, and model evaluation.
 
 The application is deployed online using **Render**, while heavy GRU prediction generation is handled separately to keep the production web application lightweight and stable.
-
-```
