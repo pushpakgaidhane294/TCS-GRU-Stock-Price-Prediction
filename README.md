@@ -1,4 +1,4 @@
-Absolutely. Here is a **complete, updated, direct copy-paste `README.md`** for your current **TCS Stock Price Prediction Using GRU + Flask** project.
+Yes. Below is the **proper Markdown syntax**, ready to copy directly into your `README.md`. I’ve cleaned the formatting issues from the uploaded version, especially the broken code fences and inconsistent list formatting. 
 
 ````markdown
 # 📈 TCS Stock Price Prediction Using GRU
@@ -231,7 +231,6 @@ GRU-Stock-Prediction/
 ├── generate_evaluation_cache.py
 ├── generate_latest_prediction.py
 ├── app.py
-│
 ├── database.db
 ├── requirements.txt
 ├── README.md
@@ -324,7 +323,7 @@ For example:
 ```text
 Previous 60 closing prices
           ↓
-        GRU Model
+      GRU Model
           ↓
 Next Trading Day Price
 ```
@@ -400,7 +399,7 @@ The application compares:
 
 ```text
 Predicted Price
-        vs
+      vs
 Current Price
 ```
 
@@ -504,7 +503,7 @@ database.db
 
 The application stores:
 
-### Users
+## Users
 
 ```text
 id
@@ -513,7 +512,7 @@ password
 name
 ```
 
-### Prediction History
+## Prediction History
 
 ```text
 user_id
@@ -616,7 +615,7 @@ This prevents the production Flask worker from performing heavy TensorFlow infer
 
 Activate the virtual environment:
 
-### Windows
+## Windows
 
 ```powershell
 venv\Scripts\activate
@@ -775,13 +774,13 @@ Flask Application
 Online Dashboard
 ```
 
-After generating a new prediction locally:
+After generating a new prediction:
 
 ```powershell
 python generate_latest_prediction.py
 ```
 
-commit the updated prediction file:
+Commit the updated prediction file:
 
 ```powershell
 git add data/latest_prediction.json
@@ -1005,6 +1004,4 @@ The trained model is integrated with a **Flask web application** that provides a
 
 The application is deployed online using **Render**, while heavy GRU prediction generation is handled separately to keep the production web application lightweight and stable.
 
----
-
-
+```
