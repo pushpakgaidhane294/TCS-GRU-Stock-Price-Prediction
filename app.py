@@ -1,4 +1,14 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash
+from flask import (
+    Flask,
+    render_template,
+    request,
+    redirect,
+    url_for,
+    session,
+    send_file,
+    flash
+)
+
 from flask_login import (
     LoginManager,
     UserMixin,
@@ -7,7 +17,11 @@ from flask_login import (
     logout_user,
     current_user
 )
-from werkzeug.security import generate_password_hash, check_password_hash
+
+from werkzeug.security import (
+    generate_password_hash,
+    check_password_hash
+)
 
 import sqlite3
 import os
@@ -17,12 +31,12 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error
+)
 
-try:
-    from tensorflow.keras.models import load_model  # type: ignore[import-not-found,reportMissingModuleSource]
-except ImportError:  # pragma: no cover
-    load_model = None  # type: ignore[assignment]
+from tensorflow.keras.models import load_model
 
 
 # ============================================================
@@ -44,6 +58,11 @@ if os.environ.get("RENDER"):
 else:
     app.config["SESSION_COOKIE_SECURE"] = False
 
+
+# ============================================================
+# LOGIN CONFIGURATION
+# ============================================================
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = "login"
@@ -58,7 +77,6 @@ SCALER_PATH = "model/scaler.pkl"
 DATA_PATH = "data/TCS_stock.csv"
 DATABASE = "database.db"
 
-# Original model training information
 MODEL_TRAIN_SIZE = 1580
 ORIGINAL_TEST_END = 1976
 SEQUENCE_LENGTH = 60
@@ -66,12 +84,17 @@ TICKER = "TCS.NS"
 
 
 # ============================================================
-# LOAD MODEL AND SCALER
+# LOAD GRU MODEL
 # ============================================================
 
 print("Loading GRU model...")
 
-model = load_model(MODEL_PATH)
+# compile=False is enough because this application only predicts.
+# It reduces unnecessary model loading overhead.
+model = load_model(
+    MODEL_PATH,
+    compile=False
+)
 
 scaler = joblib.load(SCALER_PATH)
 
@@ -82,44 +105,66 @@ print("GRU model loaded successfully.")
 # LOAD HISTORICAL DATA
 # ============================================================
 
-historical_data = pd.read_csv(DATA_PATH)
+def load_historical_data():
 
-historical_data["Date"] = pd.to_datetime(
-    historical_data["Date"]
-)
+    data = pd.read_csv(DATA_PATH)
 
-historical_data["Close"] = pd.to_numeric(
-    historical_data["Close"],
-    errors="coerce"
-)
-
-historical_data = historical_data.dropna(
-    subset=["Close"]
-).reset_index(drop=True)
-
-
-def reload_historical_data():
-
-    global historical_data
-
-    historical_data = pd.read_csv(DATA_PATH)
-
-    historical_data["Date"] = pd.to_datetime(
-        historical_data["Date"]
-    )
-
-    historical_data["Close"] = pd.to_numeric(
-        historical_data["Close"],
+    data["Date"] = pd.to_datetime(
+        data["Date"],
         errors="coerce"
     )
 
-    historical_data = historical_data.dropna(
-        subset=["Close"]
-    ).reset_index(drop=True)
-
-    print(
-        f"Reloaded TCS data: {len(historical_data)} rows"
+    data["Close"] = pd.to_numeric(
+        data["Close"],
+        errors="coerce"
     )
+
+    data = data.dropna(
+        subset=["Date", "Close"]
+    )
+
+    data = data.sort_values(
+        "Date"
+    )
+
+    data = data.drop_duplicates(
+        subset=["Date"],
+        keep="last"
+    )
+
+    data = data.reset_index(
+        drop=True
+    )
+
+    return data
+
+
+historical_data = load_historical_data()
+
+
+# ============================================================
+# GLOBAL CACHE
+# ============================================================
+
+# This prevents TensorFlow prediction from running every time
+# the dashboard page is opened.
+
+LATEST_PREDICTION_CACHE = {
+    "date": None,
+    "price": None
+}
+
+
+# Model evaluation results are calculated once when the server
+# starts instead of repeatedly during requests.
+
+MAE = 0.0
+RMSE = 0.0
+PREDICTION_ACCURACY = 0.0
+
+actual_prices = np.array([])
+predicted_prices = np.array([])
+test_dates = pd.Series(dtype="datetime64[ns]")
 
 
 # ============================================================
@@ -128,7 +173,10 @@ def reload_historical_data():
 
 def get_db_connection():
 
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(
+        DATABASE,
+        timeout=10
+    )
 
     conn.row_factory = sqlite3.Row
 
@@ -158,6 +206,7 @@ def init_db():
     ]
 
     if "name" not in columns:
+
         conn.execute(
             "ALTER TABLE users ADD COLUMN name TEXT"
         )
@@ -191,7 +240,12 @@ init_db()
 
 class User(UserMixin):
 
-    def __init__(self, user_id, username, name=None):
+    def __init__(
+        self,
+        user_id,
+        username,
+        name=None
+    ):
 
         self.id = str(user_id)
         self.username = username
@@ -200,8 +254,6 @@ class User(UserMixin):
 
 @login_manager.user_loader
 def load_user(user_id):
-
-    print(f"Loading user from session: {user_id}")
 
     conn = get_db_connection()
 
@@ -220,19 +272,11 @@ def load_user(user_id):
 
         if user:
 
-            print(
-                f"Session user found: {user['username']}"
-            )
-
             return User(
                 user["id"],
                 user["username"],
                 user["name"]
             )
-
-        print(
-            f"Session user NOT found: {user_id}"
-        )
 
         return None
 
@@ -251,23 +295,45 @@ def load_user(user_id):
 # PREDICTION ACCURACY
 # ============================================================
 
-def calculate_prediction_accuracy(actual, predicted):
-    actual = np.asarray(actual, dtype=float)
-    predicted = np.asarray(predicted, dtype=float)
+def calculate_prediction_accuracy(
+    actual,
+    predicted
+):
+
+    actual = np.asarray(
+        actual,
+        dtype=float
+    )
+
+    predicted = np.asarray(
+        predicted,
+        dtype=float
+    )
+
     mask = actual != 0
 
     if not np.any(mask):
         return 0.0
 
     mape = np.mean(
-        np.abs((actual[mask] - predicted[mask]) / actual[mask])
+        np.abs(
+            (
+                actual[mask] -
+                predicted[mask]
+            )
+            /
+            actual[mask]
+        )
     ) * 100
 
-    return max(0.0, 100.0 - mape)
+    return max(
+        0.0,
+        100.0 - mape
+    )
 
 
 # ============================================================
-# PREDICTION HISTORY HELPERS
+# PREDICTION HISTORY
 # ============================================================
 
 def save_prediction_history(
@@ -279,6 +345,7 @@ def save_prediction_history(
     percentage_change,
     direction
 ):
+
     conn = get_db_connection()
 
     existing = conn.execute(
@@ -288,10 +355,14 @@ def save_prediction_history(
         WHERE user_id = ?
         AND prediction_date = ?
         """,
-        (user_id, prediction_date)
+        (
+            user_id,
+            prediction_date
+        )
     ).fetchone()
 
     if existing:
+
         conn.close()
         return
 
@@ -324,19 +395,35 @@ def save_prediction_history(
     conn.close()
 
 
-def get_prediction_history(user_id, limit=10):
+def get_prediction_history(
+    user_id,
+    limit=10
+):
+
     conn = get_db_connection()
+
     rows = conn.execute(
         """
-        SELECT prediction_date, latest_price, predicted_price, difference, percentage_change, direction
+        SELECT
+            prediction_date,
+            latest_price,
+            predicted_price,
+            difference,
+            percentage_change,
+            direction
         FROM prediction_history
         WHERE user_id = ?
         ORDER BY id DESC
         LIMIT ?
         """,
-        (user_id, limit)
+        (
+            user_id,
+            limit
+        )
     ).fetchall()
+
     conn.close()
+
     return rows
 
 
@@ -346,63 +433,60 @@ def get_prediction_history(user_id, limit=10):
 
 def calculate_model_results():
 
-    data = historical_data["Close"].values.reshape(-1, 1)
+    global historical_data
+
+    data = historical_data[
+        "Close"
+    ].values.astype(
+        np.float32
+    ).reshape(
+        -1,
+        1
+    )
 
     total_rows = len(data)
 
-    train_size = int(total_rows * 0.80)
+    train_size = int(
+        total_rows * 0.80
+    )
 
-    train_data = data[:train_size]
+    train_data = data[
+        :train_size
+    ]
 
-    test_data = data[train_size:]
-
-    # --------------------------------------------------------
-    # Scaler is already fitted only on training data
-    # --------------------------------------------------------
-
-    train_scaled = scaler.transform(train_data)
-
-    test_scaled = scaler.transform(test_data)
+    test_data = data[
+        train_size:
+    ]
 
     # --------------------------------------------------------
-    # TRAIN SEQUENCES
+    # SCALE DATA
     # --------------------------------------------------------
 
-    X_train = []
-    y_train = []
+    train_scaled = scaler.transform(
+        train_data
+    )
 
-    for i in range(
-        SEQUENCE_LENGTH,
-        len(train_scaled)
-    ):
-
-        X_train.append(
-            train_scaled[
-                i - SEQUENCE_LENGTH:i
-            ]
-        )
-
-        y_train.append(
-            train_scaled[i]
-        )
-
-    X_train = np.array(X_train)
-
-    y_train = np.array(y_train)
+    test_scaled = scaler.transform(
+        test_data
+    )
 
     # --------------------------------------------------------
-    # TEST SEQUENCES
+    # ONLY CREATE TEST SEQUENCES
+    #
+    # The old code created X_train even though it was never
+    # used for prediction. That unnecessary work is removed.
     # --------------------------------------------------------
 
     combined_test = np.concatenate(
         (
-            train_scaled[-SEQUENCE_LENGTH:],
+            train_scaled[
+                -SEQUENCE_LENGTH:
+            ],
             test_scaled
         )
     )
 
     X_test = []
-    y_test = []
 
     for i in range(
         SEQUENCE_LENGTH,
@@ -415,13 +499,25 @@ def calculate_model_results():
             ]
         )
 
-        y_test.append(
-            combined_test[i]
+    X_test = np.asarray(
+        X_test,
+        dtype=np.float32
+    )
+
+    y_test = np.asarray(
+        test_scaled,
+        dtype=np.float32
+    )
+
+    if len(X_test) == 0:
+
+        return (
+            0.0,
+            0.0,
+            np.array([]),
+            np.array([]),
+            pd.Series(dtype="datetime64[ns]")
         )
-
-    X_test = np.array(X_test)
-
-    y_test = np.array(y_test)
 
     # --------------------------------------------------------
     # PREDICTION
@@ -429,11 +525,12 @@ def calculate_model_results():
 
     predictions_scaled = model.predict(
         X_test,
+        batch_size=32,
         verbose=0
     )
 
     # --------------------------------------------------------
-    # CONVERT BACK TO ORIGINAL PRICE
+    # INVERSE TRANSFORM
     # --------------------------------------------------------
 
     predictions = scaler.inverse_transform(
@@ -441,7 +538,10 @@ def calculate_model_results():
     ).flatten()
 
     actual = scaler.inverse_transform(
-        y_test.reshape(-1, 1)
+        y_test.reshape(
+            -1,
+            1
+        )
     ).flatten()
 
     # --------------------------------------------------------
@@ -461,84 +561,137 @@ def calculate_model_results():
     )
 
     # --------------------------------------------------------
-    # TEST DATES
+    # DATES
     # --------------------------------------------------------
 
-    test_dates = historical_data[
+    test_dates_result = historical_data[
         "Date"
-    ].iloc[train_size:].reset_index(drop=True)
+    ].iloc[
+        train_size:
+    ].reset_index(
+        drop=True
+    )
 
     return (
-        mae,
-        rmse,
+        float(mae),
+        float(rmse),
         actual,
         predictions,
-        test_dates
+        test_dates_result
     )
 
 
-def calculate_extended_predictions():
-    """
-    Generate Actual vs Predicted values from the original model
-    training boundary up to the latest available trading date.
+# ============================================================
+# EXTENDED ACTUAL VS PREDICTED
+# ============================================================
 
-    The GRU model is NOT retrained.
-    """
+def calculate_extended_predictions():
 
     global historical_data
 
-    if historical_data is None or len(historical_data) <= MODEL_TRAIN_SIZE:
-        return [], [], []
+    if (
+        historical_data is None
+        or
+        len(historical_data) <= MODEL_TRAIN_SIZE
+    ):
 
-    close_prices = historical_data["Close"].values.reshape(-1, 1)
+        return (
+            np.array([]),
+            np.array([]),
+            pd.Series(dtype="datetime64[ns]")
+        )
 
-    # Keep the original model training period fixed
-    train_data = close_prices[:MODEL_TRAIN_SIZE]
+    close_prices = historical_data[
+        "Close"
+    ].values.astype(
+        np.float32
+    ).reshape(
+        -1,
+        1
+    )
 
-    # Everything after original training becomes out-of-sample data
-    future_data = close_prices[MODEL_TRAIN_SIZE:]
+    # Original training period remains fixed.
+    train_data = close_prices[
+        :MODEL_TRAIN_SIZE
+    ]
 
-    # Use the SAME scaler that was used during model training
-    train_scaled = scaler.transform(train_data)
-    future_scaled = scaler.transform(future_data)
+    future_data = close_prices[
+        MODEL_TRAIN_SIZE:
+    ]
 
-    # Last 60 training values are needed to predict the first test value
+    train_scaled = scaler.transform(
+        train_data
+    )
+
+    future_scaled = scaler.transform(
+        future_data
+    )
+
     combined_scaled = np.concatenate(
-        [train_scaled[-SEQUENCE_LENGTH:], future_scaled]
+        [
+            train_scaled[
+                -SEQUENCE_LENGTH:
+            ],
+            future_scaled
+        ]
     )
 
     X_extended = []
 
-    for i in range(SEQUENCE_LENGTH, len(combined_scaled)):
+    for i in range(
+        SEQUENCE_LENGTH,
+        len(combined_scaled)
+    ):
+
         X_extended.append(
-            combined_scaled[i-SEQUENCE_LENGTH:i]
+            combined_scaled[
+                i - SEQUENCE_LENGTH:i
+            ]
         )
 
-    X_extended = np.array(X_extended)
+    X_extended = np.asarray(
+        X_extended,
+        dtype=np.float32
+    )
 
     if len(X_extended) == 0:
-        return [], [], []
 
-    # Use existing trained GRU model
+        return (
+            np.array([]),
+            np.array([]),
+            pd.Series(dtype="datetime64[ns]")
+        )
+
     predicted_scaled = model.predict(
         X_extended,
+        batch_size=32,
         verbose=0
     )
 
-    # Convert predictions back to actual ₹ prices
-    predicted_prices_extended = scaler.inverse_transform(
-        predicted_scaled
-    ).flatten()
+    predicted_prices_extended = (
+        scaler.inverse_transform(
+            predicted_scaled
+        )
+        .flatten()
+    )
 
-    actual_prices_extended = scaler.inverse_transform(
-        future_scaled
-    ).flatten()
+    actual_prices_extended = (
+        scaler.inverse_transform(
+            future_scaled
+        )
+        .flatten()
+    )
 
-    # Corresponding dates
     test_dates_extended = (
-        historical_data["Date"]
-        .iloc[MODEL_TRAIN_SIZE:]
-        .reset_index(drop=True)
+        historical_data[
+            "Date"
+        ]
+        .iloc[
+            MODEL_TRAIN_SIZE:
+        ]
+        .reset_index(
+            drop=True
+        )
     )
 
     return (
@@ -549,60 +702,21 @@ def calculate_extended_predictions():
 
 
 # ============================================================
-# GET MARKET DATA
+# GET STORED TCS DATA
 # ============================================================
 
-def get_stored_tcs_data():
-
-    print("Using stored TCS data from CSV...")
-
-    latest_price = float(
-        historical_data["Close"].iloc[-1]
-    )
-
-    latest_date = historical_data[
-        "Date"
-    ].iloc[-1].strftime("%d %b %Y")
-
-    recent = historical_data.tail(252)
-
-    recent_prices = historical_data[
-        "Close"
-    ].tail(SEQUENCE_LENGTH).values
-
-    chart_dates = [
-        date.strftime("%d %b %Y")
-        for date in recent["Date"]
-    ]
-
-    chart_prices = [
-        round(float(price), 2)
-        for price in recent["Close"]
-    ]
-
-    return (
-        latest_price,
-        latest_date,
-        recent_prices,
-        chart_dates,
-        chart_prices,
-        False
-    )
-
-
 def get_latest_tcs_data():
-    """
-    Get latest TCS data from the locally stored CSV.
-
-    Yahoo Finance is only called when the user explicitly
-    clicks Refresh Market Data.
-    """
 
     global historical_data
 
-    if historical_data is None or historical_data.empty:
+    if (
+        historical_data is None
+        or
+        historical_data.empty
+    ):
+
         return {
-            "latest_price": 0,
+            "latest_price": 0.0,
             "latest_date": "",
             "recent_prices": [],
             "chart_dates": [],
@@ -611,32 +725,51 @@ def get_latest_tcs_data():
         }
 
     latest_price = float(
-        historical_data["Close"].iloc[-1]
+        historical_data[
+            "Close"
+        ].iloc[-1]
     )
 
-    latest_date = str(
-        historical_data["Date"].iloc[-1]
+    latest_date = (
+        historical_data[
+            "Date"
+        ].iloc[-1]
+        .strftime(
+            "%d %b %Y"
+        )
     )
 
     recent_prices = (
-        historical_data["Close"]
-        .tail(60)
-        .tolist()
-    )
-
-    chart_data = historical_data.tail(252)
-
-    chart_dates = (
-        chart_data["Date"]
-        .astype(str)
-        .tolist()
-    )
-
-    chart_prices = (
-        chart_data["Close"]
+        historical_data[
+            "Close"
+        ]
+        .tail(SEQUENCE_LENGTH)
         .astype(float)
         .tolist()
     )
+
+    chart_data = historical_data.tail(
+        252
+    )
+
+    chart_dates = [
+        date.strftime(
+            "%d %b %Y"
+        )
+        for date in chart_data[
+            "Date"
+        ]
+    ]
+
+    chart_prices = [
+        round(
+            float(price),
+            2
+        )
+        for price in chart_data[
+            "Close"
+        ]
+    ]
 
     return {
         "latest_price": latest_price,
@@ -648,22 +781,23 @@ def get_latest_tcs_data():
     }
 
 
-def refresh_market_data():
-    """
-    Download latest TCS data from Yahoo Finance and MERGE it
-    with the existing full historical dataset.
+# ============================================================
+# REFRESH MARKET DATA
+# ============================================================
 
-    This prevents the original 2018-present history from
-    being overwritten by only the latest 3 months.
-    """
+def refresh_market_data():
 
     global historical_data
     global actual_prices
     global predicted_prices
     global test_dates
+    global LATEST_PREDICTION_CACHE
 
     try:
-        print("Refreshing TCS market data...")
+
+        print(
+            "Refreshing TCS market data..."
+        )
 
         latest_data = yf.download(
             TICKER,
@@ -675,66 +809,110 @@ def refresh_market_data():
         )
 
         if latest_data.empty:
-            print("Yahoo Finance returned no data.")
+
+            print(
+                "Yahoo Finance returned no data."
+            )
+
             return False
 
-        # Handle Yahoo Finance MultiIndex columns
-        if isinstance(latest_data.columns, pd.MultiIndex):
-            latest_data.columns = latest_data.columns.get_level_values(0)
+        # ----------------------------------------------------
+        # HANDLE MULTIINDEX
+        # ----------------------------------------------------
 
-        latest_data = latest_data.reset_index()
+        if isinstance(
+            latest_data.columns,
+            pd.MultiIndex
+        ):
 
-        # Keep only required columns
-        latest_data = latest_data[["Date", "Close"]].copy()
+            latest_data.columns = (
+                latest_data.columns
+                .get_level_values(0)
+            )
 
-        latest_data["Date"] = pd.to_datetime(
-            latest_data["Date"]
+        latest_data = (
+            latest_data
+            .reset_index()
         )
 
-        latest_data["Close"] = pd.to_numeric(
-            latest_data["Close"],
-            errors="coerce"
+        latest_data = latest_data[
+            ["Date", "Close"]
+        ].copy()
+
+        latest_data["Date"] = (
+            pd.to_datetime(
+                latest_data["Date"],
+                errors="coerce"
+            )
+        )
+
+        latest_data["Close"] = (
+            pd.to_numeric(
+                latest_data["Close"],
+                errors="coerce"
+            )
         )
 
         latest_data.dropna(
-            subset=["Date", "Close"],
+            subset=[
+                "Date",
+                "Close"
+            ],
             inplace=True
         )
 
-        # Load existing full historical data
-        existing_data = pd.read_csv(DATA_PATH)
+        # ----------------------------------------------------
+        # LOAD EXISTING FULL DATA
+        # ----------------------------------------------------
 
-        existing_data["Date"] = pd.to_datetime(
-            existing_data["Date"]
+        existing_data = pd.read_csv(
+            DATA_PATH
         )
 
-        existing_data["Close"] = pd.to_numeric(
-            existing_data["Close"],
-            errors="coerce"
+        existing_data["Date"] = (
+            pd.to_datetime(
+                existing_data["Date"],
+                errors="coerce"
+            )
+        )
+
+        existing_data["Close"] = (
+            pd.to_numeric(
+                existing_data["Close"],
+                errors="coerce"
+            )
         )
 
         existing_data.dropna(
-            subset=["Date", "Close"],
+            subset=[
+                "Date",
+                "Close"
+            ],
             inplace=True
         )
 
-        # Merge old + new data
+        # ----------------------------------------------------
+        # MERGE OLD + NEW
+        # ----------------------------------------------------
+
         combined_data = pd.concat(
             [
-                existing_data[["Date", "Close"]],
-                latest_data[["Date", "Close"]]
+                existing_data[
+                    ["Date", "Close"]
+                ],
+                latest_data[
+                    ["Date", "Close"]
+                ]
             ],
             ignore_index=True
         )
 
-        # Remove duplicate trading dates
         combined_data.drop_duplicates(
             subset=["Date"],
             keep="last",
             inplace=True
         )
 
-        # Sort chronologically
         combined_data.sort_values(
             "Date",
             inplace=True
@@ -745,16 +923,35 @@ def refresh_market_data():
             inplace=True
         )
 
-        # Save FULL historical dataset
+        # ----------------------------------------------------
+        # SAVE FULL DATASET
+        # ----------------------------------------------------
+
         combined_data.to_csv(
             DATA_PATH,
             index=False
         )
 
-        # Reload data
-        historical_data = combined_data.copy()
+        historical_data = (
+            combined_data.copy()
+        )
 
-        # Recalculate Actual vs Predicted graph
+        # ----------------------------------------------------
+        # CLEAR LATEST PREDICTION CACHE
+        # ----------------------------------------------------
+
+        LATEST_PREDICTION_CACHE = {
+            "date": None,
+            "price": None
+        }
+
+        # ----------------------------------------------------
+        # UPDATE ACTUAL VS PREDICTED GRAPH
+        #
+        # This expensive operation happens ONLY when the user
+        # clicks Refresh Market Data.
+        # ----------------------------------------------------
+
         (
             actual_prices,
             predicted_prices,
@@ -767,7 +964,9 @@ def refresh_market_data():
 
         print(
             "Latest date:",
-            historical_data["Date"].iloc[-1]
+            historical_data[
+                "Date"
+            ].iloc[-1]
         )
 
         print(
@@ -778,6 +977,7 @@ def refresh_market_data():
         return True
 
     except Exception as e:
+
         print(
             "Market refresh error:",
             str(e)
@@ -790,198 +990,225 @@ def refresh_market_data():
 # MAKE LATEST PREDICTION
 # ============================================================
 
-def make_latest_prediction(recent_prices):
-    """
-    Predict the next trading day's TCS closing price
-    using the latest 60 closing prices.
-    """
+def make_latest_prediction(
+    recent_prices
+):
 
     try:
+
         recent_prices = pd.to_numeric(
-            pd.Series(recent_prices),
+            pd.Series(
+                recent_prices
+            ),
             errors="coerce"
-        ).dropna().values
+        ).dropna().values.astype(
+            np.float32
+        )
 
         if len(recent_prices) < SEQUENCE_LENGTH:
+
             raise ValueError(
-                f"Need at least {SEQUENCE_LENGTH} prices for prediction."
+                f"Need at least "
+                f"{SEQUENCE_LENGTH} prices "
+                f"for prediction."
             )
 
-        recent_prices = recent_prices[-SEQUENCE_LENGTH:]
+        recent_prices = (
+            recent_prices[
+                -SEQUENCE_LENGTH:
+            ]
+        )
 
         scaled_prices = scaler.transform(
-            recent_prices.reshape(-1, 1)
+            recent_prices.reshape(
+                -1,
+                1
+            )
         )
 
         X_latest = scaled_prices.reshape(
             1,
             SEQUENCE_LENGTH,
             1
+        ).astype(
+            np.float32
         )
 
         predicted_scaled = model.predict(
             X_latest,
+            batch_size=1,
             verbose=0
         )
 
-        predicted_price = scaler.inverse_transform(
-            predicted_scaled
-        )[0][0]
+        predicted_price = (
+            scaler.inverse_transform(
+                predicted_scaled
+            )[0][0]
+        )
 
-        return float(predicted_price)
+        return float(
+            predicted_price
+        )
 
     except Exception as e:
+
         print(
             "Latest prediction error:",
             str(e)
         )
+
         return None
 
 
-# ------------------------------------------------------------
-# ADD EXPECTED MOVEMENT TO SESSION (used by dashboard card)
-# ------------------------------------------------------------
+# ============================================================
+# CACHED LATEST PREDICTION
+# ============================================================
 
-def save_prediction_movement(session_data, prediction_price, latest_price):
+def get_cached_latest_prediction(
+    recent_prices,
+    latest_date
+):
 
-    difference = round(
-        prediction_price - latest_price,
-        2
+    global LATEST_PREDICTION_CACHE
+
+    # --------------------------------------------------------
+    # RETURN EXISTING PREDICTION
+    # --------------------------------------------------------
+
+    if (
+        LATEST_PREDICTION_CACHE["date"]
+        == latest_date
+        and
+        LATEST_PREDICTION_CACHE["price"]
+        is not None
+    ):
+
+        return float(
+            LATEST_PREDICTION_CACHE[
+                "price"
+            ]
+        )
+
+    # --------------------------------------------------------
+    # RUN GRU ONLY ONCE FOR THIS DATE
+    # --------------------------------------------------------
+
+    prediction = make_latest_prediction(
+        recent_prices
     )
 
-    if difference > 0:
-        direction = "UP"
-    else:
-        direction = "DOWN"
+    if prediction is not None:
 
-    percentage_change = round(
-        (difference / latest_price) * 100,
-        2
-    ) if latest_price else 0.0
+        LATEST_PREDICTION_CACHE = {
+            "date": latest_date,
+            "price": float(prediction)
+        }
 
-    session_data["difference"] = difference
-    session_data["direction"] = direction
-    session_data["percentage_change"] = percentage_change
-
-    return session_data
+    return prediction
 
 
 # ============================================================
-# CALCULATE MODEL RESULTS
-# ============================================================
-
-(
-    MAE,
-    RMSE,
-    actual_prices,
-    predicted_prices,
-    test_dates
-) = calculate_model_results()
-
-# Extended Actual vs Predicted graph
-(
-    actual_prices,
-    predicted_prices,
-    test_dates
-) = calculate_extended_predictions()
-
-
-print(
-    f"Model MAE: ₹{MAE:.2f}"
-)
-
-print(
-    f"Model RMSE: ₹{RMSE:.2f}"
-)
-
-PREDICTION_ACCURACY = calculate_prediction_accuracy(
-    actual_prices,
-    predicted_prices
-)
-
-print(
-    f"Prediction Accuracy: {PREDICTION_ACCURACY:.2f}%"
-)
-
-
-# ============================================================
-# COMMON DASHBOARD DATA
+# DASHBOARD DATA
 # ============================================================
 
 def get_dashboard_data():
 
+    global historical_data
     global actual_prices
     global predicted_prices
     global test_dates
 
     latest_data = get_latest_tcs_data()
 
-    latest_price = latest_data["latest_price"]
-    latest_date = latest_data["latest_date"]
-    recent_prices = latest_data["recent_prices"]
-    chart_dates = latest_data["chart_dates"]
-    chart_prices = latest_data["chart_prices"]
-    live_data_available = latest_data["live"]
-
-    current_price = float(latest_price)
-
-    predicted_price = make_latest_prediction(
-        recent_prices
+    latest_price = (
+        latest_data[
+            "latest_price"
+        ]
     )
 
-    if predicted_price is not None:
-        if predicted_price > current_price:
-            prediction_direction = "UP"
-        elif predicted_price < current_price:
-            prediction_direction = "DOWN"
-        else:
-            prediction_direction = "UNCHANGED"
-    else:
-        prediction_direction = "N/A"
+    latest_date = (
+        latest_data[
+            "latest_date"
+        ]
+    )
 
-    # NOTE: prediction history is saved only in the /predict route.
+    recent_prices = (
+        latest_data[
+            "recent_prices"
+        ]
+    )
+
+    chart_dates = (
+        latest_data[
+            "chart_dates"
+        ]
+    )
+
+    chart_prices = (
+        latest_data[
+            "chart_prices"
+        ]
+    )
+
+    live_data_available = (
+        latest_data[
+            "live"
+        ]
+    )
+
+    current_price = float(
+        latest_price
+    )
 
     # --------------------------------------------------------
-    # PRICE STATISTICS
+    # IMPORTANT:
+    # Prediction is now calculated ONLY ONCE.
     # --------------------------------------------------------
 
-    highest_price = round(
-        float(historical_data["Close"].max()),
-        2
+    predicted_price = (
+        get_cached_latest_prediction(
+            recent_prices,
+            latest_date
+        )
     )
 
-    lowest_price = round(
-        float(historical_data["Close"].min()),
-        2
-    )
-
-    average_price = round(
-        float(historical_data["Close"].mean()),
-        2
-    )
-
-    predicted_price = make_latest_prediction(
-        recent_prices
-    )
-
-    current_price = float(latest_price)
+    # --------------------------------------------------------
+    # PRICE MOVEMENT
+    # --------------------------------------------------------
 
     if predicted_price is not None:
-        price_difference = predicted_price - current_price
+
+        price_difference = (
+            predicted_price -
+            current_price
+        )
+
         percentage_change = (
-            (price_difference / current_price) * 100
-        ) if current_price else 0.0
+            (
+                price_difference /
+                current_price
+            ) * 100
+            if current_price
+            else 0.0
+        )
 
         if predicted_price > current_price:
+
             direction = "UP"
             direction_symbol = "📈"
+
         elif predicted_price < current_price:
+
             direction = "DOWN"
             direction_symbol = "📉"
+
         else:
+
             direction = "NEUTRAL"
             direction_symbol = "➖"
+
     else:
+
         predicted_price = current_price
         price_difference = 0.0
         percentage_change = 0.0
@@ -989,63 +1216,142 @@ def get_dashboard_data():
         direction_symbol = "➖"
 
     # --------------------------------------------------------
-    # Historical chart data
+    # PRICE STATISTICS
     # --------------------------------------------------------
 
+    highest_price = round(
+        float(
+            historical_data[
+                "Close"
+            ].max()
+        ),
+        2
+    )
+
+    lowest_price = round(
+        float(
+            historical_data[
+                "Close"
+            ].min()
+        ),
+        2
+    )
+
+    average_price = round(
+        float(
+            historical_data[
+                "Close"
+            ].mean()
+        ),
+        2
+    )
+
+    # --------------------------------------------------------
+    # HISTORICAL CHART
+    #
+    # Keep 252 points instead of sending the entire dataset.
+    # --------------------------------------------------------
+
+    historical_chart_data = (
+        historical_data.tail(252)
+    )
+
     historical_chart_dates = [
-        date.strftime("%d %b %Y")
-        for date in historical_data["Date"]
+        date.strftime(
+            "%d %b %Y"
+        )
+        for date in historical_chart_data[
+            "Date"
+        ]
     ]
 
     historical_chart_prices = [
-        round(float(price), 2)
-        for price in historical_data["Close"]
+        round(
+            float(price),
+            2
+        )
+        for price in historical_chart_data[
+            "Close"
+        ]
     ]
 
     # --------------------------------------------------------
-    # Actual vs predicted chart data
+    # ACTUAL VS PREDICTED
     # --------------------------------------------------------
 
     comparison_dates = [
-        date.strftime("%d %b %Y")
+        date.strftime(
+            "%d %b %Y"
+        )
         for date in test_dates
     ]
 
     actual_chart_prices = [
-        round(float(price), 2)
+        round(
+            float(price),
+            2
+        )
         for price in actual_prices
     ]
 
     predicted_chart_prices = [
-        round(float(price), 2)
+        round(
+            float(price),
+            2
+        )
         for price in predicted_prices
     ]
 
+    # --------------------------------------------------------
+    # RETURN
+    # --------------------------------------------------------
+
     return {
 
-        "latest_price": latest_price,
+        "latest_price":
+            latest_price,
 
-        "latest_date": latest_date,
+        "latest_date":
+            latest_date,
 
-        "predicted_price": predicted_price,
+        "predicted_price":
+            round(
+                float(predicted_price),
+                2
+            ),
 
-        "price_difference": price_difference,
+        "price_difference":
+            round(
+                float(price_difference),
+                2
+            ),
 
-        "percentage_change": percentage_change,
+        "percentage_change":
+            round(
+                float(percentage_change),
+                2
+            ),
 
-        "direction": direction,
+        "direction":
+            direction,
 
-        "direction_symbol": direction_symbol,
+        "direction_symbol":
+            direction_symbol,
 
-        "mae": MAE,
+        "mae":
+            MAE,
 
-        "rmse": RMSE,
+        "rmse":
+            RMSE,
 
-        "prediction_accuracy": PREDICTION_ACCURACY,
+        "prediction_accuracy":
+            PREDICTION_ACCURACY,
 
-        "chart_dates": chart_dates,
+        "chart_dates":
+            chart_dates,
 
-        "chart_prices": chart_prices,
+        "chart_prices":
+            chart_prices,
 
         "historical_chart_dates":
             historical_chart_dates,
@@ -1077,6 +1383,43 @@ def get_dashboard_data():
 
 
 # ============================================================
+# CALCULATE MODEL RESULTS ONCE
+# ============================================================
+
+print(
+    "Calculating model evaluation..."
+)
+
+(
+    MAE,
+    RMSE,
+    actual_prices,
+    predicted_prices,
+    test_dates
+) = calculate_model_results()
+
+PREDICTION_ACCURACY = (
+    calculate_prediction_accuracy(
+        actual_prices,
+        predicted_prices
+    )
+)
+
+print(
+    f"Model MAE: ₹{MAE:.2f}"
+)
+
+print(
+    f"Model RMSE: ₹{RMSE:.2f}"
+)
+
+print(
+    f"Prediction Accuracy: "
+    f"{PREDICTION_ACCURACY:.2f}%"
+)
+
+
+# ============================================================
 # ROUTE - HOME
 # ============================================================
 
@@ -1098,7 +1441,10 @@ def index():
 # ROUTE - LOGIN
 # ============================================================
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route(
+    "/login",
+    methods=["GET", "POST"]
+)
 def login():
 
     if request.method == "POST":
@@ -1113,15 +1459,14 @@ def login():
             ""
         )
 
-        print(
-            f"LOGIN ATTEMPT: {email}"
-        )
-
         if not email or not password:
 
             return render_template(
                 "login.html",
-                error="Please enter email and password."
+                error=(
+                    "Please enter "
+                    "email and password."
+                )
             )
 
         conn = get_db_connection()
@@ -1130,7 +1475,11 @@ def login():
 
             user = conn.execute(
                 """
-                SELECT id, username, password, name
+                SELECT
+                    id,
+                    username,
+                    password,
+                    name
                 FROM users
                 WHERE LOWER(username) = ?
                 """,
@@ -1141,29 +1490,29 @@ def login():
 
             if user is None:
 
-                print(
-                    f"LOGIN FAILED: user not found - {email}"
-                )
-
                 return render_template(
                     "login.html",
-                    error="Invalid email or password."
+                    error=(
+                        "Invalid email "
+                        "or password."
+                    )
                 )
 
-            password_valid = check_password_hash(
-                user["password"],
-                password
+            password_valid = (
+                check_password_hash(
+                    user["password"],
+                    password
+                )
             )
 
             if not password_valid:
 
-                print(
-                    f"LOGIN FAILED: wrong password - {email}"
-                )
-
                 return render_template(
                     "login.html",
-                    error="Invalid email or password."
+                    error=(
+                        "Invalid email "
+                        "or password."
+                    )
                 )
 
             logged_user = User(
@@ -1177,108 +1526,153 @@ def login():
                 remember=False
             )
 
-            print(
-                f"LOGIN SUCCESS: {email}"
-            )
-
-            print(
-                f"AUTHENTICATED BEFORE REDIRECT: "
-                f"{current_user.is_authenticated}"
-            )
-
             return redirect(
                 url_for("dashboard")
             )
 
         except Exception as e:
 
-            print(
-                f"LOGIN ERROR: {e}"
-            )
-
             try:
                 conn.close()
             except Exception:
                 pass
 
-            return render_template(
-                "login.html",
-                error="Login failed. Please try again."
+            print(
+                f"Login error: {e}"
             )
 
-    return render_template("login.html")
+            return render_template(
+                "login.html",
+                error=(
+                    "Login failed. "
+                    "Please try again."
+                )
+            )
+
+    return render_template(
+        "login.html"
+    )
 
 
 # ============================================================
 # ROUTE - REGISTER
 # ============================================================
 
-@app.route("/register", methods=["GET", "POST"])
+@app.route(
+    "/register",
+    methods=["GET", "POST"]
+)
 def register():
 
     if request.method == "POST":
 
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "").strip()
+        name = request.form.get(
+            "name",
+            ""
+        ).strip()
+
+        email = request.form.get(
+            "email",
+            ""
+        ).strip().lower()
+
+        password = request.form.get(
+            "password",
+            ""
+        ).strip()
 
         if not name or not email or not password:
+
             return render_template(
                 "register.html",
                 error="Please fill all fields."
             )
 
         if len(password) < 6:
+
             return render_template(
                 "register.html",
-                error="Password must be at least 6 characters."
+                error=(
+                    "Password must be "
+                    "at least 6 characters."
+                )
             )
 
         conn = get_db_connection()
 
         try:
+
             existing_user = conn.execute(
-                "SELECT id FROM users WHERE LOWER(username) = ?",
+                """
+                SELECT id
+                FROM users
+                WHERE LOWER(username) = ?
+                """,
                 (email,)
             ).fetchone()
 
             if existing_user:
+
                 conn.close()
+
                 return render_template(
                     "register.html",
-                    error="Email already exists. Please use another email."
+                    error=(
+                        "Email already exists. "
+                        "Please use another email."
+                    )
                 )
 
-            hashed_password = generate_password_hash(password)
+            hashed_password = (
+                generate_password_hash(
+                    password
+                )
+            )
 
             conn.execute(
                 """
-                INSERT INTO users (username, password, name)
+                INSERT INTO users
+                (
+                    username,
+                    password,
+                    name
+                )
                 VALUES (?, ?, ?)
                 """,
-                (email, hashed_password, name)
+                (
+                    email,
+                    hashed_password,
+                    name
+                )
             )
 
             conn.commit()
             conn.close()
 
-            print(f"Registration successful: {email}")
-
-            return redirect(url_for("login"))
+            return redirect(
+                url_for("login")
+            )
 
         except Exception as e:
 
             conn.rollback()
             conn.close()
 
-            print(f"Registration error: {e}")
+            print(
+                f"Registration error: {e}"
+            )
 
             return render_template(
                 "register.html",
-                error="Registration failed. Please try again."
+                error=(
+                    "Registration failed. "
+                    "Please try again."
+                )
             )
 
-    return render_template("register.html")
+    return render_template(
+        "register.html"
+    )
 
 
 # ============================================================
@@ -1304,28 +1698,14 @@ def logout():
 @login_required
 def dashboard():
 
-    print(
-        "DASHBOARD REQUEST"
+    dashboard_data = (
+        get_dashboard_data()
     )
 
-    print(
-        f"Authenticated: "
-        f"{current_user.is_authenticated}"
-    )
-
-    print(
-        f"User ID: "
-        f"{current_user.id}"
-    )
-
-    print(
-        f"Username: "
-        f"{current_user.username}"
-    )
-
-    dashboard_data = get_dashboard_data()
-    prediction_history = get_prediction_history(
-        current_user.id
+    prediction_history = (
+        get_prediction_history(
+            current_user.id
+        )
     )
 
     return render_template(
@@ -1338,30 +1718,33 @@ def dashboard():
 
 
 # ============================================================
-# ROUTE - PREDICT
-# ============================================================
-
-# ============================================================
 # ROUTE - REFRESH MARKET DATA
 # ============================================================
 
 @app.route("/refresh-market")
 @login_required
 def refresh_market():
+
     success = refresh_market_data()
 
     if success:
+
         flash(
             "Market data refreshed successfully.",
             "success"
         )
+
     else:
+
         flash(
-            "Unable to refresh market data. Showing stored data.",
+            "Unable to refresh market data. "
+            "Showing stored data.",
             "warning"
         )
 
-    return redirect(url_for("dashboard"))
+    return redirect(
+        url_for("dashboard")
+    )
 
 
 # ============================================================
@@ -1375,41 +1758,78 @@ def refresh_market():
 @login_required
 def predict():
 
-    dashboard_data = get_dashboard_data()
+    dashboard_data = (
+        get_dashboard_data()
+    )
 
     prediction = round(
-        float(dashboard_data.get("predicted_price", 0)),
+        float(
+            dashboard_data.get(
+                "predicted_price",
+                0
+            )
+        ),
         2
     )
 
-    session["predicted_price"] = prediction
+    session[
+        "predicted_price"
+    ] = prediction
 
     latest_price = float(
-        dashboard_data.get("latest_price", 0)
+        dashboard_data.get(
+            "latest_price",
+            0
+        )
     )
 
     difference = round(
-        prediction - latest_price,
+        prediction -
+        latest_price,
         2
     )
 
     if difference > 0:
+
         direction = "UP"
-    else:
+
+    elif difference < 0:
+
         direction = "DOWN"
 
+    else:
+
+        direction = "NEUTRAL"
+
     percentage_change = round(
-        (difference / latest_price) * 100,
+        (
+            difference /
+            latest_price
+        ) * 100,
         2
     ) if latest_price else 0.0
 
-    session["difference"] = difference
-    session["direction"] = direction
-    session["percentage_change"] = percentage_change
+    session[
+        "difference"
+    ] = difference
 
-    dashboard_data["predicted_price"] = prediction
+    session[
+        "direction"
+    ] = direction
 
-    prediction_date = dashboard_data.get("latest_date")
+    session[
+        "percentage_change"
+    ] = percentage_change
+
+    dashboard_data[
+        "predicted_price"
+    ] = prediction
+
+    prediction_date = (
+        dashboard_data.get(
+            "latest_date"
+        )
+    )
 
     save_prediction_history(
         current_user.id,
@@ -1421,17 +1841,17 @@ def predict():
         direction
     )
 
-    prediction_history = get_prediction_history(current_user.id)
+    prediction_history = (
+        get_prediction_history(
+            current_user.id
+        )
+    )
 
     return render_template(
         "dashboard.html",
-
         current_user=current_user,
-
         prediction_done=True,
-
         prediction_history=prediction_history,
-
         **dashboard_data
     )
 
@@ -1440,7 +1860,9 @@ def predict():
 # ROUTE - DOWNLOAD HISTORICAL DATA
 # ============================================================
 
-@app.route("/download/historical")
+@app.route(
+    "/download/historical"
+)
 @login_required
 def download_historical():
 
@@ -1457,7 +1879,9 @@ def download_historical():
         output,
         mimetype="text/csv",
         as_attachment=True,
-        download_name="TCS_historical_data.csv"
+        download_name=(
+            "TCS_historical_data.csv"
+        )
     )
 
 
@@ -1466,4 +1890,16 @@ def download_historical():
 # ============================================================
 
 if __name__ == "__main__":
-    app.run(debug=True)
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            5000
+        )
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=False
+    )
