@@ -1,5 +1,3 @@
-Yes. Below is the **proper Markdown syntax**, ready to copy directly into your `README.md`. I’ve cleaned the formatting issues from the uploaded version, especially the broken code fences and inconsistent list formatting. 
-
 ````markdown
 # 📈 TCS Stock Price Prediction Using GRU
 
